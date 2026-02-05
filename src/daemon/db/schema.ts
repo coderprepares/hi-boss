@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS config (
   auto_level TEXT DEFAULT '${DEFAULT_AGENT_AUTO_LEVEL}',
   permission_level TEXT DEFAULT '${DEFAULT_AGENT_PERMISSION_LEVEL}',
   session_policy TEXT,           -- JSON blob for SessionPolicyConfig
+  run_timeout TEXT,              -- e.g. "10m"
   created_at INTEGER DEFAULT (CAST(strftime('%s','now') AS INTEGER) * 1000),
   last_seen_at INTEGER,
   metadata TEXT

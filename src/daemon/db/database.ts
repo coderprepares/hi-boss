@@ -31,6 +31,7 @@ interface AgentRow {
   auto_level: string | null;
   permission_level: string | null;
   session_policy: string | null;
+  run_timeout: string | null;
   created_at: number;
   last_seen_at: number | null;
   metadata: string | null;
@@ -131,8 +132,17 @@ export class HiBossDatabase {
 
   private initSchema(): void {
     this.db.exec(SCHEMA_SQL);
+    this.migrateSchema();
     this.assertSchemaCompatible();
     this.reconcileStaleAgentRunsOnStartup();
+  }
+
+  private migrateSchema(): void {
+    const agentInfo = this.db.prepare("PRAGMA table_info(agents)").all() as Array<{ name: string }>;
+    const agentCols = new Set(agentInfo.map((col) => col.name));
+    if (!agentCols.has("run_timeout")) {
+      this.db.prepare("ALTER TABLE agents ADD COLUMN run_timeout TEXT").run();
+    }
   }
 
   private assertSchemaCompatible(): void {
@@ -149,6 +159,7 @@ export class HiBossDatabase {
         "auto_level",
         "permission_level",
         "session_policy",
+        "run_timeout",
         "created_at",
         "last_seen_at",
         "metadata",
@@ -291,8 +302,8 @@ export class HiBossDatabase {
     const createdAt = Date.now();
 
     const stmt = this.db.prepare(`
-      INSERT INTO agents (name, token, description, workspace, provider, model, reasoning_effort, auto_level, permission_level, session_policy, created_at, metadata)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO agents (name, token, description, workspace, provider, model, reasoning_effort, auto_level, permission_level, session_policy, run_timeout, created_at, metadata)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -306,6 +317,7 @@ export class HiBossDatabase {
       input.autoLevel ?? DEFAULT_AGENT_AUTO_LEVEL,
       input.permissionLevel ?? DEFAULT_AGENT_PERMISSION_LEVEL,
       input.sessionPolicy ? JSON.stringify(input.sessionPolicy) : null,
+      input.runTimeout ? input.runTimeout.trim() : null,
       createdAt,
       input.metadata ? JSON.stringify(input.metadata) : null
     );
@@ -376,6 +388,7 @@ export class HiBossDatabase {
       model?: string | null;
       reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" | null;
       autoLevel?: "medium" | "high" | null;
+      runTimeout?: string | null;
     }
   ): Agent {
     const agent = this.getAgentByNameCaseInsensitive(name);
@@ -409,6 +422,10 @@ export class HiBossDatabase {
     if (update.autoLevel !== undefined) {
       updates.push("auto_level = ?");
       params.push(update.autoLevel);
+    }
+    if (update.runTimeout !== undefined) {
+      updates.push("run_timeout = ?");
+      params.push(update.runTimeout);
     }
 
     if (updates.length === 0) {
@@ -601,6 +618,7 @@ export class HiBossDatabase {
       autoLevel,
       permissionLevel,
       sessionPolicy,
+      runTimeout: row.run_timeout && row.run_timeout.trim() ? row.run_timeout : undefined,
       createdAt: row.created_at,
       lastSeenAt: row.last_seen_at ?? undefined,
       metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
