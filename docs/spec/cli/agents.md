@@ -28,6 +28,8 @@ Flags:
   - `--session-daily-reset-at HH:MM`
   - `--session-idle-timeout <duration>` (units: `d/h/m/s`)
   - `--session-max-context-length <n>`
+- Run timeout:
+  - `--run-timeout <duration>` (units: `d/h/m/s`)
 
 Defaults (when flags are omitted):
 - `provider`: none (required)
@@ -77,6 +79,8 @@ Flags:
   - `--session-idle-timeout <duration>` (optional; units: `d/h/m/s`)
   - `--session-max-context-length <n>` (optional)
   - `--clear-session-policy` (optional)
+- Run timeout:
+  - `--run-timeout <duration>` (optional; units: `d/h/m/s`)
 - Metadata:
   - `--metadata-json <json>` or `--metadata-file <path>` (optional)
   - `--clear-metadata` (optional)
@@ -100,6 +104,7 @@ Output (parseable):
 - `success: true|false`
 - `agent-name:`
 - Updated fields when present (e.g., `provider:`, `model:`, `reasoning-effort:`, `auto-level:`, `permission-level:`)
+- `run-timeout:` (optional)
 - `bindings:` (optional; comma-separated adapter types)
 
 ## `hiboss agent delete`
@@ -186,6 +191,7 @@ bindings: telegram
 session-daily-reset-at: 03:00
 session-idle-timeout: 30m
 session-max-context-length: 180000
+run-timeout: 10m
 agent-state: idle
 agent-health: ok
 pending-count: 0
@@ -208,6 +214,7 @@ Output (parseable):
 - `session-daily-reset-at:` (optional)
 - `session-idle-timeout:` (optional)
 - `session-max-context-length:` (optional)
+- `run-timeout:`
 - `agent-state:` (`running|idle`)
 - `agent-health:` (`ok|error|unknown`)
 - `pending-count: <n>`

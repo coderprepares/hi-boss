@@ -52,8 +52,26 @@ The Telegram adapter connects Hi-Boss to Telegram bots, enabling agents to commu
 | `/new` | Refresh the bound agent session (boss-only) |
 | `/status` | Show `hiboss agent status` for the bound agent (boss-only) |
 | `/abort` | Cancel current run + clear due pending inbox for the bound agent (boss-only) |
+| `/verbose` | Toggle per-chat verbose streaming (boss-only) |
 
 Commands are boss-only: non-boss users get no reply.
+
+### Status messages
+
+When enabled, the daemon streams agent output into a single Telegram status message by editing it during the run.
+The status message uses HTML parse mode (thinking italic, assistant bold) without labels, and truncates with `...` + tail content
+when the combined text exceeds Telegram's 4096-char limit. If there is no content yet (including provider placeholders like
+`(no content)`), no status message is sent.
+Default: enabled.
+While status messages are enabled, the bot also sends a `typing` chat action during the run.
+When the run finishes, the status message is deleted.
+Tool calls are sent as separate Telegram messages (plain text), one message per `tool.call`, with full (untruncated) redacted input detail.
+Bash calls matching `hiboss envelope ...` are excluded from these tool-call messages.
+
+Enable/disable per chat:
+- `/verbose` → returns `verbose: on|off`
+- `/verbose on` → enable
+- `/verbose off` → disable
 
 ## Limitations
 
