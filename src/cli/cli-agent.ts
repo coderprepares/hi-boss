@@ -49,6 +49,7 @@ export function registerAgentCommands(program: Command): void {
       "Refresh session after a run's context length exceeds N tokens",
       parseInt
     )
+    .option("--run-timeout <duration>", "Run timeout (e.g., 10m; units: d/h/m/s)")
     .option("--metadata-json <json>", "Agent metadata JSON object")
     .option("--metadata-file <path>", "Path to agent metadata JSON file")
     .option("--bind-adapter-type <type>", "Bind adapter type at creation (e.g., telegram)")
@@ -68,6 +69,7 @@ export function registerAgentCommands(program: Command): void {
         sessionDailyResetAt: options.sessionDailyResetAt,
         sessionIdleTimeout: options.sessionIdleTimeout,
         sessionMaxContextLength: options.sessionMaxContextLength,
+        runTimeout: options.runTimeout,
         metadataJson: options.metadataJson,
         metadataFile: options.metadataFile,
         bindAdapterType: options.bindAdapterType,
@@ -113,6 +115,7 @@ export function registerAgentCommands(program: Command): void {
       "Refresh session after a run's context length exceeds N tokens",
       parseInt
     )
+    .option("--run-timeout <duration>", "Run timeout (e.g., 10m; units: d/h/m/s)")
     .option("--clear-session-policy", "Clear session policy")
     .option("--metadata-json <json>", "Agent metadata JSON object")
     .option("--metadata-file <path>", "Path to agent metadata JSON file")
@@ -135,6 +138,7 @@ export function registerAgentCommands(program: Command): void {
         sessionDailyResetAt: options.sessionDailyResetAt,
         sessionIdleTimeout: options.sessionIdleTimeout,
         sessionMaxContextLength: options.sessionMaxContextLength,
+        runTimeout: options.runTimeout,
         clearSessionPolicy: options.clearSessionPolicy,
         metadataJson: options.metadataJson,
         metadataFile: options.metadataFile,

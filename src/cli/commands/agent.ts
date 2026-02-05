@@ -6,7 +6,7 @@ import { formatShortId } from "../../shared/id-format.js";
 import { formatUnixMsAsTimeZoneOffset } from "../../shared/time.js";
 import { AGENT_NAME_ERROR_MESSAGE, isValidAgentName } from "../../shared/validation.js";
 import { resolveToken } from "../token.js";
-import { DEFAULT_AGENT_PERMISSION_LEVEL } from "../../shared/defaults.js";
+import { DEFAULT_AGENT_RUN_TIMEOUT } from "../../shared/defaults.js";
 import { normalizeDefaultSentinel, readMetadataInput, sanitizeAgentMetadata } from "./agent-shared.js";
 import { getDaemonTimeContext } from "../time-context.js";
 export { bindAgent, unbindAgent } from "./agent-bindings.js";
@@ -54,6 +54,7 @@ export interface RegisterAgentOptions {
   sessionDailyResetAt?: string;
   sessionIdleTimeout?: string;
   sessionMaxContextLength?: number;
+  runTimeout?: string;
   metadataJson?: string;
   metadataFile?: string;
   bindAdapterType?: string;
@@ -93,6 +94,7 @@ export interface SetAgentOptions {
   sessionDailyResetAt?: string;
   sessionIdleTimeout?: string;
   sessionMaxContextLength?: number;
+  runTimeout?: string;
   clearSessionPolicy?: boolean;
   metadataJson?: string;
   metadataFile?: string;
@@ -135,6 +137,7 @@ export async function registerAgent(options: RegisterAgentOptions): Promise<void
       sessionDailyResetAt: options.sessionDailyResetAt,
       sessionIdleTimeout: options.sessionIdleTimeout,
       sessionMaxContextLength: options.sessionMaxContextLength,
+      runTimeout: options.runTimeout,
       bindAdapterType: options.bindAdapterType,
       bindAdapterToken: options.bindAdapterToken,
     });
@@ -212,6 +215,7 @@ export async function setAgent(options: SetAgentOptions): Promise<void> {
       autoLevel: options.autoLevel,
       permissionLevel: options.permissionLevel,
       sessionPolicy,
+      runTimeout: options.runTimeout,
       metadata,
       bindAdapterType: options.bindAdapterType,
       bindAdapterToken: options.bindAdapterToken,
@@ -252,6 +256,9 @@ export async function setAgent(options: SetAgentOptions): Promise<void> {
       if (typeof sp.maxContextLength === "number") {
         console.log(`session-max-context-length: ${sp.maxContextLength}`);
       }
+    }
+    if (result.agent.runTimeout) {
+      console.log(`run-timeout: ${result.agent.runTimeout}`);
     }
     if (result.bindings.length > 0) {
       console.log(`bindings: ${result.bindings.join(", ")}`);
@@ -340,6 +347,8 @@ export async function agentStatus(options: AgentStatusOptions): Promise<void> {
         console.log(`session-max-context-length: ${sp.maxContextLength}`);
       }
     }
+    const runTimeout = result.agent.runTimeout ?? DEFAULT_AGENT_RUN_TIMEOUT;
+    console.log(`run-timeout: ${runTimeout}`);
     console.log(`agent-state: ${result.status.agentState}`);
     console.log(`agent-health: ${result.status.agentHealth}`);
     console.log(`pending-count: ${result.status.pendingCount}`);
