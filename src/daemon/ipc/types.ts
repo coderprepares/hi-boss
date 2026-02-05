@@ -119,6 +119,7 @@ export interface AgentRegisterParams {
   sessionDailyResetAt?: string;
   sessionIdleTimeout?: string;
   sessionMaxContextLength?: number;
+  runTimeout?: string;
   bindAdapterType?: string;
   bindAdapterToken?: string;
 }
@@ -205,6 +206,7 @@ export interface AgentStatusResult {
       idleTimeout?: string;
       maxContextLength?: number;
     };
+    runTimeout?: string;
   };
   bindings: string[];
   effective: {
@@ -257,6 +259,7 @@ export interface AgentSetParams {
     idleTimeout?: string;
     maxContextLength?: number;
   } | null;
+  runTimeout?: string;
   metadata?: Record<string, unknown> | null;
   bindAdapterType?: string;
   bindAdapterToken?: string;
@@ -275,6 +278,7 @@ export interface AgentSetResult {
     autoLevel: "medium" | "high";
     permissionLevel: "restricted" | "standard" | "privileged" | "boss";
     sessionPolicy?: unknown;
+    runTimeout?: string;
     metadata?: unknown;
   };
   bindings: string[];

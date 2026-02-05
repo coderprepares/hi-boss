@@ -2,11 +2,10 @@ import type { HiBossDatabase } from "../db/database.js";
 import type { Envelope, CreateEnvelopeInput } from "../../envelope/types.js";
 import { getEnvelopeSourceFromCreateInput } from "../../envelope/source.js";
 import { parseAddress } from "../../adapters/types.js";
-import type { ChatAdapter } from "../../adapters/types.js";
+import type { ChatAdapter, OutgoingParseMode } from "../../adapters/types.js";
 import { formatUnixMsAsTimeZoneOffset, isDueUnixMs } from "../../shared/time.js";
 import { errorMessage, logEvent } from "../../shared/daemon-log.js";
 import { RPC_ERRORS } from "../ipc/types.js";
-import type { OutgoingParseMode } from "../../adapters/types.js";
 
 export type EnvelopeHandler = (envelope: Envelope) => void | Promise<void>;
 

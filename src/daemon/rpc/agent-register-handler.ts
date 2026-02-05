@@ -114,6 +114,19 @@ export function createAgentRegisterHandler(ctx: DaemonContext): RpcMethodHandler
         sessionPolicy.maxContextLength = Math.trunc(p.sessionMaxContextLength);
       }
 
+      let runTimeout: string | undefined;
+      if (p.runTimeout !== undefined) {
+        if (typeof p.runTimeout !== "string") {
+          rpcError(RPC_ERRORS.INVALID_PARAMS, "Invalid run-timeout");
+        }
+        const trimmed = p.runTimeout.trim();
+        if (!trimmed) {
+          rpcError(RPC_ERRORS.INVALID_PARAMS, "Invalid run-timeout");
+        }
+        parseDurationToMs(trimmed);
+        runTimeout = trimmed;
+      }
+
       const result = ctx.db.registerAgent({
         name: p.name,
         description: p.description,
@@ -124,6 +137,7 @@ export function createAgentRegisterHandler(ctx: DaemonContext): RpcMethodHandler
         autoLevel,
         permissionLevel,
         sessionPolicy: Object.keys(sessionPolicy).length > 0 ? (sessionPolicy as any) : undefined,
+        runTimeout,
         metadata,
       });
 

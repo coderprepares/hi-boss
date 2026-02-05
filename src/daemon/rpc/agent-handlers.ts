@@ -26,6 +26,7 @@ import {
   DEFAULT_AGENT_AUTO_LEVEL,
   DEFAULT_AGENT_PERMISSION_LEVEL,
   DEFAULT_AGENT_PROVIDER,
+  DEFAULT_AGENT_RUN_TIMEOUT,
 } from "../../shared/defaults.js";
 import { createAgentRegisterHandler } from "./agent-register-handler.js";
 
@@ -95,6 +96,7 @@ export function createAgentHandlers(ctx: DaemonContext): RpcMethodRegistry {
       const effectiveAutoLevel = agent.autoLevel ?? DEFAULT_AGENT_AUTO_LEVEL;
       const effectivePermissionLevel = agent.permissionLevel ?? DEFAULT_AGENT_PERMISSION_LEVEL;
       const effectiveWorkspace = agent.workspace ?? process.cwd();
+      const effectiveRunTimeout = agent.runTimeout ?? DEFAULT_AGENT_RUN_TIMEOUT;
 
       const isBusy = ctx.executor.isAgentBusy(agent.name);
       const pendingCount = ctx.db.countDuePendingEnvelopesForAgent(agent.name);
@@ -114,6 +116,7 @@ export function createAgentHandlers(ctx: DaemonContext): RpcMethodRegistry {
           ...(agent.autoLevel ? { autoLevel: agent.autoLevel } : {}),
           ...(agent.permissionLevel ? { permissionLevel: agent.permissionLevel } : {}),
           ...(agent.sessionPolicy ? { sessionPolicy: agent.sessionPolicy } : {}),
+          runTimeout: effectiveRunTimeout,
         },
         bindings,
         effective: {

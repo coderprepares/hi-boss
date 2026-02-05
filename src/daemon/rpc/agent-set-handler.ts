@@ -59,6 +59,7 @@ export function createAgentSetHandler(ctx: DaemonContext): RpcMethodRegistry {
         p.autoLevel !== undefined ||
         p.permissionLevel !== undefined ||
         p.sessionPolicy !== undefined ||
+        p.runTimeout !== undefined ||
         p.metadata !== undefined ||
         wantsBind ||
         wantsUnbind;
@@ -77,6 +78,7 @@ export function createAgentSetHandler(ctx: DaemonContext): RpcMethodRegistry {
         ...(p.autoLevel !== undefined ? ["auto-level"] : []),
         ...(p.permissionLevel !== undefined ? ["permission-level"] : []),
         ...(p.sessionPolicy !== undefined ? ["session-policy"] : []),
+        ...(p.runTimeout !== undefined ? ["run-timeout"] : []),
         ...(p.metadata !== undefined ? ["metadata"] : []),
         ...(wantsBind ? ["bind-adapter"] : []),
         ...(wantsUnbind ? ["unbind-adapter"] : []),
@@ -227,6 +229,19 @@ export function createAgentSetHandler(ctx: DaemonContext): RpcMethodRegistry {
         }
       }
 
+      let runTimeout: string | null | undefined;
+      if (p.runTimeout !== undefined) {
+        if (typeof p.runTimeout !== "string") {
+          rpcError(RPC_ERRORS.INVALID_PARAMS, "Invalid run-timeout");
+        }
+        const trimmed = p.runTimeout.trim();
+        if (!trimmed) {
+          rpcError(RPC_ERRORS.INVALID_PARAMS, "Invalid run-timeout");
+        }
+        parseDurationToMs(trimmed);
+        runTimeout = trimmed;
+      }
+
       const before = ctx.db.getAgentByName(agentName)!;
 
       if (provider === "claude" || provider === "codex") {
@@ -308,6 +323,7 @@ export function createAgentSetHandler(ctx: DaemonContext): RpcMethodRegistry {
         model?: string | null;
         reasoningEffort?: Agent["reasoningEffort"] | null;
         autoLevel?: Agent["autoLevel"] | null;
+        runTimeout?: string | null;
       } = {};
 
       if (p.description !== undefined) {
@@ -358,6 +374,9 @@ export function createAgentSetHandler(ctx: DaemonContext): RpcMethodRegistry {
 
       if (autoLevel !== undefined) {
         updates.autoLevel = autoLevel;
+      }
+      if (runTimeout !== undefined) {
+        updates.runTimeout = runTimeout;
       }
 
       ctx.db.runInTransaction(() => {
@@ -412,6 +431,7 @@ export function createAgentSetHandler(ctx: DaemonContext): RpcMethodRegistry {
           autoLevel: updated.autoLevel ?? DEFAULT_AGENT_AUTO_LEVEL,
           permissionLevel: updated.permissionLevel ?? DEFAULT_AGENT_PERMISSION_LEVEL,
           sessionPolicy: updated.sessionPolicy,
+          runTimeout: updated.runTimeout,
           metadata: updated.metadata,
         },
         bindings,
