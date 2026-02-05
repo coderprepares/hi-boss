@@ -5,7 +5,12 @@ import {
   DEFAULT_AGENT_AUTO_LEVEL,
   DEFAULT_AGENT_PERMISSION_LEVEL,
   DEFAULT_AGENT_PROVIDER,
+  DEFAULT_AGENT_RUN_TIMEOUT,
 } from "../shared/defaults.js";
+import {
+  getTelegramStatusMessageEnabled,
+  setTelegramStatusMessageEnabled,
+} from "./telegram-status-config.js";
 import { formatUnixMsAsTimeZoneOffset } from "../shared/time.js";
 import { formatShortId } from "../shared/id-format.js";
 
@@ -22,6 +27,7 @@ function buildAgentStatusText(params: { db: HiBossDatabase; executor: AgentExecu
   const effectiveAutoLevel = agent.autoLevel ?? DEFAULT_AGENT_AUTO_LEVEL;
   const effectivePermissionLevel = agent.permissionLevel ?? DEFAULT_AGENT_PERMISSION_LEVEL;
   const effectiveWorkspace = agent.workspace ?? process.cwd();
+  const effectiveRunTimeout = agent.runTimeout ?? DEFAULT_AGENT_RUN_TIMEOUT;
 
   const isBusy = params.executor.isAgentBusy(agent.name);
   const pendingCount = params.db.countDuePendingEnvelopesForAgent(agent.name);
@@ -54,6 +60,7 @@ function buildAgentStatusText(params: { db: HiBossDatabase; executor: AgentExecu
       lines.push(`session-max-context-length: ${sp.maxContextLength}`);
     }
   }
+  lines.push(`run-timeout: ${effectiveRunTimeout}`);
 
   const agentState = isBusy ? "running" : "idle";
   const agentHealth = !lastRun ? "unknown" : lastRun.status === "failed" ? "error" : "ok";
@@ -123,6 +130,25 @@ export function createChannelCommandHandler(params: {
         `cleared-pending-count: ${clearedPendingCount}`,
       ];
       return { text: lines.join("\n") };
+    }
+
+    if (c.command === "statusmsg") {
+      const chatId = c.chatId;
+      if (!chatId) return;
+      const arg = (c.args ?? "").trim().toLowerCase();
+      const current = getTelegramStatusMessageEnabled(params.db, chatId);
+
+      if (!arg) {
+        return { text: `statusmsg: ${current ? "on" : "off"}` };
+      }
+
+      if (arg === "on" || arg === "off") {
+        const enabled = arg === "on";
+        setTelegramStatusMessageEnabled(params.db, chatId, enabled);
+        return { text: `statusmsg: ${enabled ? "on" : "off"}` };
+      }
+
+      return { text: "error: usage /statusmsg on|off" };
     }
   };
 }

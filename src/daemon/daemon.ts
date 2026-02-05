@@ -7,7 +7,7 @@ import { HiBossDatabase } from "./db/database.js";
 import { IpcServer } from "./ipc/server.js";
 import { MessageRouter } from "./router/message-router.js";
 import { ChannelBridge } from "./bridges/channel-bridge.js";
-import { AgentExecutor, createAgentExecutor } from "../agent/executor.js";
+import { AgentExecutor, createAgentExecutor, type AgentRunStatusReporterFactory } from "../agent/executor.js";
 import type { Agent } from "../agent/types.js";
 import { EnvelopeScheduler } from "./scheduler/envelope-scheduler.js";
 import { CronScheduler } from "./scheduler/cron-scheduler.js";
@@ -16,6 +16,7 @@ import type { RpcMethodRegistry } from "./ipc/types.js";
 import { RPC_ERRORS } from "./ipc/types.js";
 import type { ChatAdapter } from "../adapters/types.js";
 import { TelegramAdapter } from "../adapters/telegram.adapter.js";
+import { TELEGRAM_MAX_TEXT_CHARS } from "../adapters/telegram/shared.js";
 import { DEFAULT_AGENT_PERMISSION_LEVEL } from "../shared/defaults.js";
 import { getHiBossPaths } from "../shared/hiboss-paths.js";
 import {
@@ -43,6 +44,7 @@ import {
   createAgentDeleteHandler,
 } from "./rpc/index.js";
 import { createChannelCommandHandler } from "./channel-commands.js";
+import { getTelegramStatusMessageEnabled } from "./telegram-status-config.js";
 
 // Re-export for CLI and external use
 export { isDaemonRunning, isSocketAcceptingConnections };
@@ -86,6 +88,253 @@ export function getSocketPath(config: DaemonConfig = getDefaultConfig()): string
   return path.join(config.daemonDir, "daemon.sock");
 }
 
+const TELEGRAM_STATUS_MESSAGE_MIN_INTERVAL_MS = 1000;
+const TELEGRAM_STATUS_MESSAGE_MIN_SECTION_CHARS = 64;
+const TELEGRAM_STATUS_MESSAGE_TOOL_MAX_CHARS = 240;
+
+function escapeTelegramHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function truncateTail(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  if (maxChars <= 3) return text.slice(-maxChars);
+  return `...${text.slice(-(maxChars - 3))}`;
+}
+
+function truncateHead(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  if (maxChars <= 3) return text.slice(0, maxChars);
+  return `${text.slice(0, maxChars - 3)}...`;
+}
+
+function collapseWhitespace(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function redactSensitiveText(text: string): string {
+  return text.replace(
+    /(token|api[_-]?key|secret|password|passcode|authorization|bearer)\s*[:=]\s*([^\s]+)/gi,
+    (_match, key) => `${key}: ***`
+  );
+}
+
+function isNoContentPlaceholder(text: string): boolean {
+  const trimmed = text.trim().toLowerCase();
+  return trimmed === "(no content)" || trimmed === "[no content]" || trimmed === "no content";
+}
+
+type StatusSection = {
+  text: string;
+  open: string;
+  close: string;
+  weight?: number;
+  maxChars?: number;
+};
+
+function allocateSectionBudgets(sections: StatusSection[], available: number): number[] {
+  if (sections.length === 0) return [];
+  if (available <= 0) return sections.map(() => 1);
+
+  const weights = sections.map((section) => section.weight ?? 1);
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  let budgets = weights.map((weight) => Math.max(1, Math.floor((available * weight) / totalWeight)));
+
+  let used = budgets.reduce((sum, budget) => sum + budget, 0);
+  let remainder = available - used;
+  let index = 0;
+  while (remainder > 0) {
+    budgets[index % budgets.length] += 1;
+    remainder -= 1;
+    index += 1;
+  }
+
+  let overflow = 0;
+  for (let i = 0; i < sections.length; i += 1) {
+    const cap = sections[i].maxChars;
+    if (typeof cap === "number" && cap > 0 && budgets[i] > cap) {
+      overflow += budgets[i] - cap;
+      budgets[i] = cap;
+    }
+  }
+
+  if (overflow > 0) {
+    const eligible = sections
+      .map((section, idx) => {
+        const cap = section.maxChars;
+        if (typeof cap === "number" && cap > 0 && budgets[idx] >= cap) return null;
+        return idx;
+      })
+      .filter((idx): idx is number => idx !== null);
+    let idx = 0;
+    while (overflow > 0 && eligible.length > 0) {
+      const target = eligible[idx % eligible.length];
+      const cap = sections[target].maxChars;
+      if (typeof cap === "number" && cap > 0 && budgets[target] >= cap) {
+        idx += 1;
+        continue;
+      }
+      budgets[target] += 1;
+      overflow -= 1;
+      idx += 1;
+    }
+  }
+
+  return budgets;
+}
+
+function renderTelegramRunStatusText(thinking: string, assistant: string, tool: string): string {
+  const thinkingRaw = thinking.trim();
+  const assistantRaw = assistant.trim();
+  const toolRaw = tool.trim();
+  const thinkingClean = thinkingRaw && !isNoContentPlaceholder(thinkingRaw) ? thinkingRaw : "";
+  const assistantClean = assistantRaw && !isNoContentPlaceholder(assistantRaw) ? assistantRaw : "";
+  const toolClean = toolRaw && !isNoContentPlaceholder(toolRaw) ? toolRaw : "";
+  if (!thinkingClean && !assistantClean && !toolClean) return "";
+
+  const sections: StatusSection[] = [];
+  if (thinkingClean) {
+    sections.push({ text: thinkingClean, open: "<i>", close: "</i>", weight: 3 });
+  }
+  if (assistantClean) {
+    sections.push({ text: assistantClean, open: "<b>", close: "</b>", weight: 3 });
+  }
+  if (toolClean) {
+    sections.push({
+      text: toolClean,
+      open: "<code>",
+      close: "</code>",
+      weight: 1,
+      maxChars: TELEGRAM_STATUS_MESSAGE_TOOL_MAX_CHARS,
+    });
+  }
+
+  const separator = sections.length > 1 ? "\n\n" : "";
+  const maxTotal = TELEGRAM_MAX_TEXT_CHARS;
+  const overhead =
+    sections.reduce((sum, section) => sum + section.open.length + section.close.length, 0) +
+    (sections.length > 1 ? separator.length * (sections.length - 1) : 0);
+  const available = Math.max(0, maxTotal - overhead);
+
+  if (sections.length === 1) {
+    let budget = Math.max(1, available);
+    let rendered = "";
+    for (let i = 0; i < 3; i++) {
+      const part = escapeTelegramHtml(truncateTail(sections[0].text, budget));
+      rendered = `${sections[0].open}${part}${sections[0].close}`;
+      if (rendered.length <= maxTotal) return rendered;
+      const excess = rendered.length - maxTotal;
+      budget = Math.max(1, budget - excess);
+    }
+    return rendered;
+  }
+
+  let budgets = allocateSectionBudgets(sections, available);
+  let rendered = "";
+  for (let i = 0; i < 3; i++) {
+    const parts = sections.map((section, idx) => escapeTelegramHtml(truncateTail(section.text, budgets[idx])));
+    rendered = parts
+      .map((part, idx) => `${sections[idx].open}${part}${sections[idx].close}`)
+      .join(separator);
+
+    if (rendered.length <= maxTotal) {
+      return rendered;
+    }
+
+    const excess = rendered.length - maxTotal;
+    const reduceEach = Math.ceil(excess / sections.length);
+    budgets = budgets.map((budget) => Math.max(1, budget - reduceEach));
+  }
+
+  return rendered;
+}
+
+function getRuntimeMessageText(message: unknown): string | null {
+  if (!message || typeof message !== "object") return null;
+  const text = (message as { text?: unknown }).text;
+  return typeof text === "string" ? text : null;
+}
+
+type ToolStatus = {
+  name?: string;
+  callId?: string;
+  detail?: string;
+  state: "running" | "done" | "error";
+};
+
+const TOOL_DETAIL_HINT_KEYS = ["command", "cmd", "query", "code", "sql", "url", "path", "text", "input", "prompt"];
+const TOOL_DETAIL_EVENT_KEYS = ["input", "arguments", "args", "toolInput", "parameters", "payload", "command", "code", "query"];
+
+function getEventString(event: Record<string, unknown>, key: string): string | undefined {
+  const value = event[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function extractToolName(event: Record<string, unknown>): string | undefined {
+  return (
+    getEventString(event, "toolName") ??
+    getEventString(event, "tool_name") ??
+    getEventString(event, "name") ??
+    getEventString(event, "tool")
+  );
+}
+
+function extractToolCallId(event: Record<string, unknown>): string | undefined {
+  return getEventString(event, "callId") ?? getEventString(event, "toolCallId") ?? getEventString(event, "id");
+}
+
+function summarizeToolValue(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    for (const key of TOOL_DETAIL_HINT_KEYS) {
+      const candidate = record[key];
+      if (typeof candidate === "string" && candidate.trim()) {
+        return `${key}=${candidate}`;
+      }
+    }
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function extractToolDetail(event: Record<string, unknown>): string | undefined {
+  for (const key of TOOL_DETAIL_EVENT_KEYS) {
+    if (!(key in event)) continue;
+    const summary = summarizeToolValue(event[key]);
+    if (summary) return summary;
+  }
+  return undefined;
+}
+
+function normalizeToolDetail(detail: string): string {
+  const redacted = redactSensitiveText(detail);
+  const collapsed = collapseWhitespace(redacted);
+  return truncateHead(collapsed, TELEGRAM_STATUS_MESSAGE_TOOL_MAX_CHARS);
+}
+
+function formatToolStatus(status: ToolStatus | null): string {
+  if (!status) return "";
+  const name = status.name?.trim();
+  const label = name ? `tool ${name}` : "tool";
+  const stateLabel = status.state === "running" ? "running" : status.state === "error" ? "error" : "done";
+  const detail = status.detail ? `: ${status.detail}` : "";
+  return `${label} (${stateLabel})${detail}`;
+}
+
 /**
  * Hi-Boss daemon - manages agents, messages, and platform integrations.
  */
@@ -104,6 +353,146 @@ export class Daemon {
   private startTimeMs: number | null = null;
   private pidLock: PidLock;
   private defaultPermissionPolicy: PermissionPolicyV1 = DEFAULT_PERMISSION_POLICY;
+  private createRunStatusReporter: AgentRunStatusReporterFactory = ({ agent, envelopes }) => {
+    const latestTelegramEnvelope = [...envelopes]
+      .reverse()
+      .find((envelope) => {
+        const md = envelope.metadata;
+        if (!md || typeof md !== "object") return false;
+        const meta = md as Record<string, unknown>;
+        return meta.platform === "telegram";
+      });
+
+    if (!latestTelegramEnvelope) return undefined;
+
+    const metadata = latestTelegramEnvelope.metadata as Record<string, unknown>;
+    const chat = metadata.chat as { id?: unknown } | undefined;
+    const chatId = typeof chat?.id === "string" ? chat.id : "";
+    if (!chatId) return undefined;
+
+    const binding = this.db.getAgentBindingByType(agent.name, "telegram");
+    if (!binding) return undefined;
+
+    const adapter = this.adapters.get(binding.adapterToken);
+    if (!adapter || !(adapter instanceof TelegramAdapter)) return undefined;
+
+    if (!getTelegramStatusMessageEnabled(this.db, chatId)) return undefined;
+
+    const status = adapter.createStatusMessage(chatId, {
+      minIntervalMs: TELEGRAM_STATUS_MESSAGE_MIN_INTERVAL_MS,
+      maxChars: TELEGRAM_MAX_TEXT_CHARS,
+      parseMode: "HTML",
+    });
+
+    let thinkingText = "";
+    let assistantText = "";
+    let toolStatus: ToolStatus | null = null;
+
+    const updateStatus = (): void => {
+      const text = renderTelegramRunStatusText(thinkingText, assistantText, formatToolStatus(toolStatus));
+      if (!text) return;
+      status.update(text);
+    };
+
+    const typing = adapter.createTypingIndicator(chatId);
+    typing.start();
+
+    const handleEvent = (event: { type?: string; [key: string]: unknown }): void => {
+      switch (event.type) {
+        case "run.started": {
+          const text = renderTelegramRunStatusText(thinkingText, assistantText, formatToolStatus(toolStatus));
+          if (text) {
+            status.start(text);
+          }
+          break;
+        }
+        case "assistant.delta": {
+          if (typeof event.textDelta === "string" && event.textDelta) {
+            assistantText += event.textDelta;
+            updateStatus();
+          }
+          break;
+        }
+        case "assistant.message": {
+          const messageText = getRuntimeMessageText((event as { message?: unknown }).message);
+          if (messageText) {
+            assistantText = messageText;
+            updateStatus();
+          }
+          break;
+        }
+        case "assistant.reasoning.delta": {
+          if (typeof event.textDelta === "string" && event.textDelta) {
+            thinkingText += event.textDelta;
+            updateStatus();
+          }
+          break;
+        }
+        case "assistant.reasoning.message": {
+          const messageText = getRuntimeMessageText((event as { message?: unknown }).message);
+          if (messageText) {
+            thinkingText = messageText;
+            updateStatus();
+          }
+          break;
+        }
+        case "tool.call": {
+          const toolEvent = event as Record<string, unknown>;
+          const toolName = extractToolName(toolEvent);
+          const detail = extractToolDetail(toolEvent);
+          toolStatus = {
+            name: toolName,
+            callId: extractToolCallId(toolEvent),
+            detail: detail ? normalizeToolDetail(detail) : undefined,
+            state: "running",
+          };
+          updateStatus();
+          break;
+        }
+        case "tool.result": {
+          const toolEvent = event as Record<string, unknown>;
+          const callId = extractToolCallId(toolEvent);
+          if (!toolStatus || !callId || toolStatus.callId === callId) {
+            toolStatus = {
+              name: toolStatus?.name ?? extractToolName(toolEvent),
+              callId: toolStatus?.callId ?? callId,
+              detail: toolStatus?.detail,
+              state: "done",
+            };
+            updateStatus();
+          }
+          break;
+        }
+        case "tool.error": {
+          const toolEvent = event as Record<string, unknown>;
+          toolStatus = {
+            name: toolStatus?.name ?? extractToolName(toolEvent),
+            callId: toolStatus?.callId ?? extractToolCallId(toolEvent),
+            detail: toolStatus?.detail,
+            state: "error",
+          };
+          updateStatus();
+          break;
+        }
+        case "run.completed": {
+          if (typeof event.finalText === "string" && event.finalText) {
+            assistantText = event.finalText;
+          }
+          break;
+        }
+        default:
+          break;
+      }
+    };
+
+    return {
+      onEvent: handleEvent,
+      finish: () => {
+        typing.stop();
+        void status.delete();
+      },
+    };
+  };
 
   constructor(private config: DaemonConfig = getDefaultConfig()) {
     const dbPath = path.join(config.daemonDir, "hiboss.db");
@@ -121,6 +510,7 @@ export class Daemon {
       db: this.db,
       hibossDir: config.dataDir,
       onEnvelopesDone: (envelopeIds) => this.cronScheduler?.onEnvelopesDone(envelopeIds),
+      createRunStatusReporter: this.createRunStatusReporter,
     });
     this.scheduler = new EnvelopeScheduler(this.db, this.router, this.executor);
     this.cronScheduler = new CronScheduler(this.db, this.scheduler);
@@ -132,6 +522,8 @@ export class Daemon {
     const raw = this.db.getConfig("permission_policy");
     return parsePermissionPolicyV1OrDefault(raw, this.defaultPermissionPolicy);
   }
+
+  // (reserved for future Telegram UX helpers)
 
   private getAgentPermissionLevel(agent: Agent): PermissionLevel {
     return agent.permissionLevel ?? DEFAULT_AGENT_PERMISSION_LEVEL;
