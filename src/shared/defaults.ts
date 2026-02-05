@@ -44,6 +44,7 @@ export const DEFAULT_AGENT_PROVIDER = "claude" as const;
 export const DEFAULT_AGENT_REASONING_EFFORT = "medium" as const;
 export const DEFAULT_AGENT_AUTO_LEVEL = "medium" as const;
 export const DEFAULT_AGENT_PERMISSION_LEVEL = "standard" as const;
+export const DEFAULT_AGENT_RUN_TIMEOUT = "10m" as const;
 
 // ==================== DB/Envelope Defaults ====================
 
