@@ -7,9 +7,15 @@ import type { HiBossDatabase } from "../daemon/db/database.js";
 import { getHiBossDir } from "./home-setup.js";
 import { buildTurnInput } from "./turn-input.js";
 import {
+  parseDurationToMs,
   parseSessionPolicyConfig,
 } from "../shared/session-policy.js";
-import { errorMessage, logEvent } from "../shared/daemon-log.js";
+import {
+  DEFAULT_AGENT_AUTO_LEVEL,
+  DEFAULT_AGENT_PROVIDER,
+  DEFAULT_AGENT_RUN_TIMEOUT,
+} from "../shared/defaults.js";
+import { errorMessage, isDaemonDebugEnabled, logEvent } from "../shared/daemon-log.js";
 import {
   queueAgentTask,
   type AgentSession,
@@ -19,13 +25,28 @@ import { writePersistedAgentSession } from "./persisted-session.js";
 import type { AgentRunTrigger } from "./executor-triggers.js";
 import { getTriggerFields } from "./executor-triggers.js";
 import { countDuePendingEnvelopesForAgent } from "./executor-db.js";
-import { executeUnifiedTurn } from "./executor-turn.js";
 import { getOrCreateAgentSession } from "./executor-session.js";
+import type { Envelope } from "../envelope/types.js";
+import { AgentRunTimeoutError, executeUnifiedTurn, type RuntimeEvent } from "./executor-turn.js";
 
 /**
  * Maximum number of pending envelopes to process in a single turn.
  */
 const MAX_ENVELOPES_PER_TURN = 10;
+const AGENT_RUN_WAIT_LOG_INTERVAL_MS = 30000;
+
+export type AgentRunStatusReporter = {
+  onEvent?: (event: RuntimeEvent) => void;
+  finish?: (result: { status: "success" | "error" | "cancelled" | "timeout"; error?: string }) => void | Promise<void>;
+};
+
+export type AgentRunStatusReporterFactory = (params: {
+  agent: Agent;
+  envelopes: Envelope[];
+  db: HiBossDatabase;
+  runId: string;
+  trigger?: AgentRunTrigger;
+}) => AgentRunStatusReporter | undefined;
 
 type InFlightAgentRun = {
   runRecordId: string;
@@ -45,17 +66,20 @@ export class AgentExecutor {
   private db: HiBossDatabase | null;
   private hibossDir: string;
   private onEnvelopesDone?: (envelopeIds: string[], db: HiBossDatabase) => void | Promise<void>;
+  private createRunStatusReporter?: AgentRunStatusReporterFactory;
 
   constructor(
     options: {
       db?: HiBossDatabase;
       hibossDir?: string;
       onEnvelopesDone?: (envelopeIds: string[], db: HiBossDatabase) => void | Promise<void>;
+      createRunStatusReporter?: AgentRunStatusReporterFactory;
     } = {}
   ) {
     this.db = options.db ?? null;
     this.hibossDir = options.hibossDir ?? getHiBossDir();
     this.onEnvelopesDone = options.onEnvelopesDone;
+    this.createRunStatusReporter = options.createRunStatusReporter;
   }
 
   /**
@@ -218,6 +242,111 @@ export class AgentExecutor {
     const run = db.createAgentRun(agent.name, envelopeIds);
     const triggerFields = getTriggerFields(trigger);
     let runStartedAtMs: number | null = null;
+    const reporter = this.createRunStatusReporter
+      ? this.createRunStatusReporter({ agent, envelopes, db, runId: run.id, trigger })
+      : undefined;
+    const debugEvents = isDaemonDebugEnabled();
+    const runTimeoutValue = agent.runTimeout ?? DEFAULT_AGENT_RUN_TIMEOUT;
+    const timeoutMs = this.resolveRunTimeoutMs(agent);
+    const shouldLogWait = debugEvents;
+    let lastEventAtMs = Date.now();
+    let lastEventType = "run.start";
+    let pendingTool: { name?: string; callId?: string; startedAtMs: number } | null = null;
+    let waitTimer: NodeJS.Timeout | null = null;
+
+    const startWaitLogger = (): void => {
+      if (!shouldLogWait || waitTimer) return;
+      waitTimer = setInterval(() => {
+        const idleMs = Date.now() - lastEventAtMs;
+        if (idleMs < AGENT_RUN_WAIT_LOG_INTERVAL_MS) return;
+        const reason = pendingTool ? "tool" : "provider";
+        logEvent("info", "agent-run-waiting", {
+          "agent-name": agent.name,
+          "agent-run-id": run.id,
+          reason,
+          "idle-ms": idleMs,
+          "last-event-type": lastEventType,
+          ...(pendingTool?.name ? { "tool-name": pendingTool.name } : {}),
+          ...(pendingTool?.callId ? { "tool-call-id": pendingTool.callId } : {}),
+          ...(pendingTool ? { "tool-idle-ms": Date.now() - pendingTool.startedAtMs } : {}),
+        });
+      }, AGENT_RUN_WAIT_LOG_INTERVAL_MS);
+    };
+
+    const stopWaitLogger = (): void => {
+      if (!waitTimer) return;
+      clearInterval(waitTimer);
+      waitTimer = null;
+    };
+
+    const handleEvent =
+      debugEvents || reporter?.onEvent
+        ? (event: RuntimeEvent) => {
+            const eventType = typeof event.type === "string" ? event.type : "unknown";
+            lastEventAtMs = Date.now();
+            lastEventType = eventType;
+            if (eventType === "tool.call") {
+              const toolName =
+                typeof (event as { toolName?: unknown }).toolName === "string"
+                  ? String((event as { toolName?: unknown }).toolName)
+                  : undefined;
+              const callId =
+                typeof (event as { callId?: unknown }).callId === "string"
+                  ? String((event as { callId?: unknown }).callId)
+                  : undefined;
+              pendingTool = {
+                name: toolName,
+                callId,
+                startedAtMs: Date.now(),
+              };
+            } else if (eventType === "tool.result" || eventType === "tool.error") {
+              const callId =
+                typeof (event as { callId?: unknown }).callId === "string"
+                  ? String((event as { callId?: unknown }).callId)
+                  : undefined;
+              if (!pendingTool || !pendingTool.callId || !callId || pendingTool.callId === callId) {
+                pendingTool = null;
+              }
+            } else if (eventType.startsWith("assistant.") || eventType === "run.completed") {
+              pendingTool = null;
+            }
+            if (debugEvents) {
+              const toolName =
+                eventType === "tool.call" && typeof (event as { toolName?: unknown }).toolName === "string"
+                  ? String((event as { toolName?: unknown }).toolName)
+                  : undefined;
+              const toolCallId =
+                (eventType === "tool.call" || eventType === "tool.result" || eventType === "tool.error") &&
+                typeof (event as { callId?: unknown }).callId === "string"
+                  ? String((event as { callId?: unknown }).callId)
+                  : undefined;
+              logEvent("info", "agent-run-event", {
+                "agent-name": agent.name,
+                "agent-run-id": run.id,
+                "event-type": eventType,
+                ...(toolName ? { "tool-name": toolName } : {}),
+                ...(toolCallId ? { "tool-call-id": toolCallId } : {}),
+              });
+            }
+            return reporter?.onEvent?.(event);
+          }
+        : undefined;
+
+    const finishReporter = async (
+      status: "success" | "error" | "cancelled" | "timeout",
+      error?: string
+    ): Promise<void> => {
+      if (!reporter?.finish) return;
+      try {
+        await reporter.finish({ status, error });
+      } catch (err) {
+        logEvent("warn", "agent-run-status-finish-failed", {
+          "agent-name": agent.name,
+          "agent-run-id": run.id,
+          error: errorMessage(err),
+        });
+      }
+    };
 
     const inFlight: InFlightAgentRun = {
       runRecordId: run.id,
@@ -259,17 +388,28 @@ export class AgentExecutor {
         "agent-run-id": run.id,
         "envelopes-read-count": envelopeIds.length,
         "pending-remaining-count": pendingRemainingCount,
+        "run-timeout": runTimeoutValue,
         ...triggerFields,
       });
       runStartedAtMs = Date.now();
+      lastEventAtMs = runStartedAtMs;
+      lastEventType = "run.start";
+      startWaitLogger();
 
       // Execute the turn
-      const turn = await executeUnifiedTurn(session, turnInput, {
-        signal: inFlight.abortController.signal,
-        onRunHandle: (handle) => {
-          inFlight.runHandle = handle;
-        },
-      });
+      let turn;
+      try {
+        turn = await executeUnifiedTurn(session, turnInput, {
+          signal: inFlight.abortController.signal,
+          onRunHandle: (handle) => {
+            inFlight.runHandle = handle;
+          },
+          onEvent: handleEvent,
+          timeoutMs,
+        });
+      } finally {
+        stopWaitLogger();
+      }
 
       if (turn.status === "cancelled") {
         const reason = inFlight.abortReason ?? "run-cancelled";
@@ -336,10 +476,20 @@ export class AgentExecutor {
           `max-context-length:${turn.usage.contextLength}>${policy.maxContextLength}`
         );
       }
+      void finishReporter("success");
       return envelopeIds.length;
     } catch (error) {
+      stopWaitLogger();
       const errorMessage = error instanceof Error ? error.message : String(error);
       db.failAgentRun(run.id, errorMessage);
+      const isTimeout = error instanceof AgentRunTimeoutError;
+      if (isTimeout) {
+        logEvent("info", "agent-run-timeout", {
+          "agent-name": agent.name,
+          "agent-run-id": run.id,
+          "run-timeout-ms": timeoutMs,
+        });
+      }
       logEvent("info", "agent-run-complete", {
         "agent-name": agent.name,
         "agent-run-id": run.id,
@@ -348,6 +498,7 @@ export class AgentExecutor {
         "context-length": null,
         error: errorMessage,
       });
+      void finishReporter(isTimeout ? "timeout" : "error", errorMessage);
       throw error;
     } finally {
       const existing = this.inFlightRuns.get(agent.name);
@@ -381,6 +532,20 @@ export class AgentExecutor {
   /**
    * Map auto level to SDK access level.
    */
+  private resolveRunTimeoutMs(agent: Agent): number {
+    const raw = agent.runTimeout ?? DEFAULT_AGENT_RUN_TIMEOUT;
+    try {
+      return parseDurationToMs(raw);
+    } catch (err) {
+      logEvent("warn", "agent-run-timeout-invalid", {
+        "agent-name": agent.name,
+        "run-timeout": raw,
+        error: errorMessage(err),
+      });
+      return parseDurationToMs(DEFAULT_AGENT_RUN_TIMEOUT);
+    }
+  }
+
   private mapAccessLevel(autoLevel: "medium" | "high"): "medium" | "high" {
     // Direct mapping - SDK uses same values
     return autoLevel;
@@ -439,6 +604,7 @@ export function createAgentExecutor(options?: {
   db?: HiBossDatabase;
   hibossDir?: string;
   onEnvelopesDone?: (envelopeIds: string[], db: HiBossDatabase) => void | Promise<void>;
+  createRunStatusReporter?: AgentRunStatusReporterFactory;
 }): AgentExecutor {
   return new AgentExecutor(options);
 }
