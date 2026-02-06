@@ -15,6 +15,12 @@ Token: `${{ hiboss.tokenEnvVar }}` is set automatically, so `--token` is usually
 Notes:
 - Prefer `--text -` (stdin) or `--text-file` for multi-line / formatted messages. Avoid building complex `--text "..."` strings in the shell.
 - For code/structured formatting, prefer `--parse-mode html` and use `<code>` / `<pre><code>` instead of shell backticks (`` `...` ``), which trigger command substitution in many shells (bash/zsh).
+- For shell verification, prefer fast non-interactive commands and explicit short command timeouts.
+- Avoid privileged or potentially blocking commands unless essential (`sudo`, password prompts, heavy system probes).
+- For every non-Hi-Boss Bash tool call, include expected runtime in the description (`timeout=8s`, `timeout: 30s`, or `max-time=2m`).
+- Do not add timeout hints to `hiboss ...` commands.
+- If a command times out, switch approach immediately and continue with a safer/faster alternative.
+- After a timeout, do not keep probing with more diagnostics in the same turn; send a best-effort user-facing reply via `hiboss envelope send`.
 
 **Address formats:**
 - `agent:<name>`

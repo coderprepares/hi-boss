@@ -20,6 +20,7 @@ import {
   queueAgentTask,
   type AgentSession,
   type SessionRefreshRequest,
+  type TurnTokenUsage,
 } from "./executor-support.js";
 import { writePersistedAgentSession } from "./persisted-session.js";
 import type { AgentRunTrigger } from "./executor-triggers.js";
@@ -27,13 +28,39 @@ import { getTriggerFields } from "./executor-triggers.js";
 import { countDuePendingEnvelopesForAgent } from "./executor-db.js";
 import { getOrCreateAgentSession } from "./executor-session.js";
 import type { Envelope } from "../envelope/types.js";
-import { AgentRunTimeoutError, executeUnifiedTurn, type RuntimeEvent } from "./executor-turn.js";
+import {
+  AgentRunTimeoutError,
+  AgentToolCallTimeoutError,
+  executeUnifiedTurn,
+  type RuntimeEvent,
+} from "./executor-turn.js";
 
 /**
  * Maximum number of pending envelopes to process in a single turn.
  */
 const MAX_ENVELOPES_PER_TURN = 10;
 const AGENT_RUN_WAIT_LOG_INTERVAL_MS = 30000;
+const AGENT_MISSING_CHANNEL_REPLY_MAX_RECOVERY_ATTEMPTS = 1;
+const AGENT_RECOVERY_PROMPT_MESSAGE_PREVIEW_CHARS = 500;
+const AGENT_TOOL_CALL_TIMEOUT_MS = 45000;
+const AGENT_TOOL_TIMEOUT_RECOVERY_MAX_ATTEMPTS = 1;
+
+function addNullableTokenCount(total: number | null, next: number | null): number | null {
+  if (total === null && next === null) return null;
+  return (total ?? 0) + (next ?? 0);
+}
+
+function mergeTurnUsage(total: TurnTokenUsage | null, next: TurnTokenUsage): TurnTokenUsage {
+  if (!total) return next;
+  return {
+    contextLength: next.contextLength ?? total.contextLength,
+    inputTokens: addNullableTokenCount(total.inputTokens, next.inputTokens),
+    outputTokens: addNullableTokenCount(total.outputTokens, next.outputTokens),
+    cacheReadTokens: addNullableTokenCount(total.cacheReadTokens, next.cacheReadTokens),
+    cacheWriteTokens: addNullableTokenCount(total.cacheWriteTokens, next.cacheWriteTokens),
+    totalTokens: addNullableTokenCount(total.totalTokens, next.totalTokens),
+  };
+}
 
 export type AgentRunStatusReporter = {
   onEvent?: (event: RuntimeEvent) => void;
@@ -395,37 +422,125 @@ export class AgentExecutor {
       lastEventAtMs = runStartedAtMs;
       lastEventType = "run.start";
       startWaitLogger();
+      const requiredChannelReplyAddresses = this.collectRequiredChannelReplyAddresses(envelopes);
 
       // Execute the turn
-      let turn;
+      let response = "";
+      let usage: TurnTokenUsage | null = null;
       try {
-        turn = await executeUnifiedTurn(session, turnInput, {
+        const firstTurn = await this.executeTurnWithToolTimeoutRecovery({
+          session,
+          turnInput,
           signal: inFlight.abortController.signal,
           onRunHandle: (handle) => {
             inFlight.runHandle = handle;
           },
           onEvent: handleEvent,
-          timeoutMs,
+          interactionTimeoutMs: timeoutMs,
+          agentName: agent.name,
+          runId: run.id,
+          envelopes,
         });
+        if (firstTurn.status === "cancelled") {
+          const reason = inFlight.abortReason ?? "run-cancelled";
+          db.cancelAgentRun(run.id, reason);
+          logEvent("info", "agent-run-complete", {
+            "agent-name": agent.name,
+            "agent-run-id": run.id,
+            state: "cancelled",
+            "duration-ms": runStartedAtMs ? Date.now() - runStartedAtMs : 0,
+            "context-length": null,
+            reason,
+          });
+          return envelopeIds.length;
+        }
+        response = firstTurn.finalText;
+        usage = mergeTurnUsage(usage, firstTurn.usage);
+
+        if (requiredChannelReplyAddresses.length > 0 && runStartedAtMs) {
+          let missingChannelReplyAddresses = this.getMissingChannelReplyAddresses(
+            db,
+            agent.name,
+            requiredChannelReplyAddresses,
+            runStartedAtMs
+          );
+          let recoveryAttempt = 0;
+
+          while (
+            missingChannelReplyAddresses.length > 0 &&
+            recoveryAttempt < AGENT_MISSING_CHANNEL_REPLY_MAX_RECOVERY_ATTEMPTS
+          ) {
+            recoveryAttempt += 1;
+            logEvent("warn", "agent-run-missing-channel-reply", {
+              "agent-name": agent.name,
+              "agent-run-id": run.id,
+              attempt: recoveryAttempt,
+              "required-channel-to": requiredChannelReplyAddresses.join(","),
+              "missing-channel-to": missingChannelReplyAddresses.join(","),
+            });
+            const recoveryTurnInput = this.buildMissingChannelReplyTurnInput({
+              missingChannelReplyAddresses,
+              envelopes,
+              attempt: recoveryAttempt,
+            });
+            const recoveryTurn = await this.executeTurnWithToolTimeoutRecovery({
+              session,
+              turnInput: recoveryTurnInput,
+              signal: inFlight.abortController.signal,
+              onRunHandle: (handle) => {
+                inFlight.runHandle = handle;
+              },
+              onEvent: handleEvent,
+              interactionTimeoutMs: timeoutMs,
+              agentName: agent.name,
+              runId: run.id,
+              envelopes,
+            });
+            if (recoveryTurn.status === "cancelled") {
+              const reason = inFlight.abortReason ?? "run-cancelled";
+              db.cancelAgentRun(run.id, reason);
+              logEvent("info", "agent-run-complete", {
+                "agent-name": agent.name,
+                "agent-run-id": run.id,
+                state: "cancelled",
+                "duration-ms": runStartedAtMs ? Date.now() - runStartedAtMs : 0,
+                "context-length": null,
+                reason,
+              });
+              return envelopeIds.length;
+            }
+            response = recoveryTurn.finalText;
+            usage = mergeTurnUsage(usage, recoveryTurn.usage);
+            missingChannelReplyAddresses = this.getMissingChannelReplyAddresses(
+              db,
+              agent.name,
+              requiredChannelReplyAddresses,
+              runStartedAtMs
+            );
+          }
+
+          if (missingChannelReplyAddresses.length > 0) {
+            throw new Error(
+              `Agent run completed without required channel reply to: ${missingChannelReplyAddresses.join(", ")}`
+            );
+          }
+
+          if (recoveryAttempt > 0) {
+            logEvent("info", "agent-run-missing-channel-reply-recovered", {
+              "agent-name": agent.name,
+              "agent-run-id": run.id,
+              attempts: recoveryAttempt,
+              "required-channel-to": requiredChannelReplyAddresses.join(","),
+            });
+          }
+        }
       } finally {
         stopWaitLogger();
       }
 
-      if (turn.status === "cancelled") {
-        const reason = inFlight.abortReason ?? "run-cancelled";
-        db.cancelAgentRun(run.id, reason);
-        logEvent("info", "agent-run-complete", {
-          "agent-name": agent.name,
-          "agent-run-id": run.id,
-          state: "cancelled",
-          "duration-ms": runStartedAtMs ? Date.now() - runStartedAtMs : 0,
-          "context-length": null,
-          reason,
-        });
-        return envelopeIds.length;
+      if (!usage) {
+        throw new Error("Missing turn usage");
       }
-
-      const response = turn.finalText;
       session.lastRunCompletedAtMs = Date.now();
 
       // Persist session handle for best-effort resume after daemon restart.
@@ -449,31 +564,31 @@ export class AgentExecutor {
       }
 
       // Complete the run record
-      db.completeAgentRun(run.id, response, turn.usage.contextLength);
+      db.completeAgentRun(run.id, response, usage.contextLength);
 
       logEvent("info", "agent-run-complete", {
         "agent-name": agent.name,
         "agent-run-id": run.id,
         state: "success",
         "duration-ms": runStartedAtMs ? Date.now() - runStartedAtMs : 0,
-        "context-length": turn.usage.contextLength,
-        "input-tokens": turn.usage.inputTokens,
-        "output-tokens": turn.usage.outputTokens,
-        "cache-read-tokens": turn.usage.cacheReadTokens,
-        "cache-write-tokens": turn.usage.cacheWriteTokens,
-        "total-tokens": turn.usage.totalTokens,
+        "context-length": usage.contextLength,
+        "input-tokens": usage.inputTokens,
+        "output-tokens": usage.outputTokens,
+        "cache-read-tokens": usage.cacheReadTokens,
+        "cache-write-tokens": usage.cacheWriteTokens,
+        "total-tokens": usage.totalTokens,
       });
 
       // Context-length refresh: if a run grew the context too large, reset the session for the next run.
       const policy = this.getSessionPolicy(agent);
       if (
         typeof policy.maxContextLength === "number" &&
-        turn.usage.contextLength !== null &&
-        turn.usage.contextLength > policy.maxContextLength
+        usage.contextLength !== null &&
+        usage.contextLength > policy.maxContextLength
       ) {
         await this.refreshSession(
           agent.name,
-          `max-context-length:${turn.usage.contextLength}>${policy.maxContextLength}`
+          `max-context-length:${usage.contextLength}>${policy.maxContextLength}`
         );
       }
       void finishReporter("success");
@@ -504,6 +619,82 @@ export class AgentExecutor {
       const existing = this.inFlightRuns.get(agent.name);
       if (existing && existing.runRecordId === run.id) {
         this.inFlightRuns.delete(agent.name);
+      }
+    }
+  }
+
+  /**
+   * Execute one turn, and if a tool call times out, run one recovery turn
+   * that asks the model to switch strategy.
+   */
+  private async executeTurnWithToolTimeoutRecovery(params: {
+    session: AgentSession;
+    turnInput: string;
+    signal?: AbortSignal;
+    onRunHandle?: (handle: RunHandle) => void;
+    onEvent?: (event: RuntimeEvent) => void | Promise<void>;
+    interactionTimeoutMs: number;
+    agentName: string;
+    runId: string;
+    envelopes: Envelope[];
+  }): Promise<{ status: "success" | "cancelled"; finalText: string; usage: TurnTokenUsage }> {
+    let input = params.turnInput;
+    let attempt = 0;
+
+    while (true) {
+      const turnAttempt = attempt + 1;
+      try {
+        return await executeUnifiedTurn(params.session, input, {
+          signal: params.signal,
+          onRunHandle: params.onRunHandle,
+          onEvent: params.onEvent,
+          timeoutMs: params.interactionTimeoutMs,
+          toolTimeoutMs: AGENT_TOOL_CALL_TIMEOUT_MS,
+          requireBashTimeoutHint: true,
+          onToolExecutionStart: (event) => {
+            logEvent("info", "agent-run-tool-start", {
+              "agent-name": params.agentName,
+              "agent-run-id": params.runId,
+              attempt: turnAttempt,
+              "tool-started-at": new Date(event.startedAtMs).toISOString(),
+              "tool-queued-ms": event.queuedMs,
+              ...(event.timeoutMs !== undefined ? { "tool-timeout-ms": event.timeoutMs } : {}),
+              ...(event.toolName ? { "tool-name": event.toolName } : {}),
+              ...(event.callId ? { "tool-call-id": event.callId } : {}),
+              ...(event.commandPreview ? { "tool-command-preview": event.commandPreview } : {}),
+              ...(event.isHiBossCommand ? { "tool-timeout-exempt": true } : {}),
+              ...(event.timeoutHintState ? { "tool-timeout-hint-state": event.timeoutHintState } : {}),
+              ...(event.timeoutHintRaw ? { "tool-timeout-hint": event.timeoutHintRaw } : {}),
+            });
+          },
+        });
+      } catch (err) {
+        if (!(err instanceof AgentToolCallTimeoutError) || attempt >= AGENT_TOOL_TIMEOUT_RECOVERY_MAX_ATTEMPTS) {
+          throw err;
+        }
+        attempt += 1;
+        logEvent("warn", "agent-run-tool-timeout", {
+          "agent-name": params.agentName,
+          "agent-run-id": params.runId,
+          attempt,
+          "tool-timeout-ms": err.toolTimeoutMs,
+          ...(err.toolName ? { "tool-name": err.toolName } : {}),
+          ...(err.callId ? { "tool-call-id": err.callId } : {}),
+          ...(err.commandPreview ? { "tool-command-preview": err.commandPreview } : {}),
+          ...(err.timeoutHintState ? { "tool-timeout-hint-state": err.timeoutHintState } : {}),
+          ...(err.timeoutHintRaw ? { "tool-timeout-hint": err.timeoutHintRaw } : {}),
+        });
+        input = this.buildToolTimeoutRecoveryTurnInput({
+          envelopes: params.envelopes,
+          attempt,
+          toolTimeoutMs: err.toolTimeoutMs,
+          toolName: err.toolName,
+          commandPreview: err.commandPreview,
+          timeoutHintState:
+            err.timeoutHintState === "missing" || err.timeoutHintState === "invalid"
+              ? err.timeoutHintState
+              : undefined,
+        });
       }
     }
   }
@@ -549,6 +740,88 @@ export class AgentExecutor {
   private mapAccessLevel(autoLevel: "medium" | "high"): "medium" | "high" {
     // Direct mapping - SDK uses same values
     return autoLevel;
+  }
+
+  private collectRequiredChannelReplyAddresses(envelopes: Envelope[]): string[] {
+    const addresses = new Set<string>();
+    for (const envelope of envelopes) {
+      if (typeof envelope.from === "string" && envelope.from.startsWith("channel:")) {
+        addresses.add(envelope.from);
+      }
+    }
+    return Array.from(addresses);
+  }
+
+  private getMissingChannelReplyAddresses(
+    db: HiBossDatabase,
+    agentName: string,
+    requiredChannelReplyAddresses: string[],
+    sinceMs: number
+  ): string[] {
+    const sent = new Set(
+      db.getSentToAddressesForAgentSince(agentName, requiredChannelReplyAddresses, sinceMs)
+    );
+    return requiredChannelReplyAddresses.filter((address) => !sent.has(address));
+  }
+
+  private buildMissingChannelReplyTurnInput(params: {
+    missingChannelReplyAddresses: string[];
+    envelopes: Envelope[];
+    attempt: number;
+  }): string {
+    const latestEnvelope = params.envelopes[params.envelopes.length - 1];
+    const latestText = latestEnvelope?.content.text?.trim() ?? "";
+    const latestPreview = latestText
+      ? latestText.slice(0, AGENT_RECOVERY_PROMPT_MESSAGE_PREVIEW_CHARS)
+      : "(empty)";
+    return [
+      "## Delivery Recovery",
+      `Attempt: ${params.attempt}.`,
+      "The previous turn completed without sending a channel reply.",
+      `You MUST send a reply now via \`hiboss envelope send\` to: ${params.missingChannelReplyAddresses.join(", ")}.`,
+      "Do not only print plain text. Execute the send command now.",
+      "If context is missing, send a short acknowledgement and one clarifying question.",
+      `Latest user message:\n${latestPreview}`,
+    ].join("\n\n");
+  }
+
+  private buildToolTimeoutRecoveryTurnInput(params: {
+    envelopes: Envelope[];
+    attempt: number;
+    toolTimeoutMs: number;
+    toolName?: string;
+    commandPreview?: string;
+    timeoutHintState?: "missing" | "invalid";
+  }): string {
+    const latestEnvelope = params.envelopes[params.envelopes.length - 1];
+    const latestText = latestEnvelope?.content.text?.trim() ?? "";
+    const latestPreview = latestText
+      ? latestText.slice(0, AGENT_RECOVERY_PROMPT_MESSAGE_PREVIEW_CHARS)
+      : "(empty)";
+    const timeoutSeconds = Math.max(1, Math.round(params.toolTimeoutMs / 1000));
+    const toolLabel = params.toolName ? params.toolName : "tool";
+    return [
+      "## Tool Timeout Recovery",
+      `Attempt: ${params.attempt}.`,
+      params.timeoutHintState === "missing"
+        ? `Your previous ${toolLabel} call did not include a timeout hint.`
+        : "",
+      params.timeoutHintState === "invalid"
+        ? `Your previous ${toolLabel} call used an invalid timeout hint.`
+        : "",
+      `Your previous ${toolLabel} command timed out after ${timeoutSeconds}s.`,
+      params.commandPreview ? `Timed out command preview:\n${params.commandPreview}` : "",
+      "Every non-Hi-Boss Bash call MUST include an expected timeout in the description.",
+      "Use one of these formats: `timeout=8s`, `timeout: 30s`, or `max-time=2m`.",
+      "Do not add timeout hints to `hiboss ...` commands.",
+      "Do NOT continue diagnostic probing in this recovery turn.",
+      "In this recovery turn, the only Bash command you should run is `hiboss envelope send`.",
+      "If verification needs admin access or keeps timing out, state the limitation clearly and give a best-effort answer.",
+      "Send the user reply now via `hiboss envelope send` instead of running more system checks.",
+      `Latest user message:\n${latestPreview}`,
+    ]
+      .filter((line) => line !== "")
+      .join("\n\n");
   }
 
   /**

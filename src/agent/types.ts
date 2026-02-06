@@ -23,7 +23,7 @@ export interface Agent {
   autoLevel?: 'medium' | 'high';
   permissionLevel?: AgentPermissionLevel;   // authorization level for CLI/RPC ops
   sessionPolicy?: SessionPolicyConfig;      // session refresh policy
-  runTimeout?: string;       // run timeout (e.g., "10m")
+  runTimeout?: string;       // per-model-interaction timeout (e.g., "10m")
   createdAt: number;       // unix epoch ms (UTC)
   lastSeenAt?: number;     // unix epoch ms (UTC)
   metadata?: Record<string, unknown>;       // extensible metadata (for future use)

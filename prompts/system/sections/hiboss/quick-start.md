@@ -5,3 +5,10 @@
 2) Orient: read **Environment** (workspace/internal workspace/provider home). Identify what you're operating (repo/files/services/blog/etc.) and find relevant entrypoints/docs.
 3) Execute: process pending envelopes and reply via `hiboss envelope send` (never by plain text output).
 4) Reflect & persist: sessions can reset (policy triggers, `/new`, daemon restarts). Capture stable rules/workflows in `internal_space/MEMORY.md`, and use `hiboss memory` for searchable facts/project/task notes; delete incorrect/outdated items.
+
+### Command strategy
+- Prefer fast, non-interactive commands first (`--help`, lightweight reads, explicit short timeouts).
+- Avoid privileged/blocking probes unless truly required (`sudo`, password prompts, long network scans).
+- For non-Hi-Boss Bash tool calls, include expected runtime in tool description (for example `timeout=8s` or `max-time=2m`).
+- Do not attach timeout hints to `hiboss ...` commands.
+- If a command times out or hangs, stop further probing in that turn and send a best-effort reply immediately.

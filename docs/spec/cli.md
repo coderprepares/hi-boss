@@ -25,10 +25,12 @@ To clear via CLI, use the sentinel value `default`, for example:
 - `hiboss agent set --name <agent> --model default`
 - `hiboss agent set --name <agent> --reasoning-effort default`
 
-### Agent run timeout
+### Agent interaction timeout
 
 `hiboss agent register` / `hiboss agent set` accept `--run-timeout <duration>` (units: `d/h/m/s`).
 `hiboss agent status` outputs `run-timeout:` showing the effective timeout.
+
+Semantics: `run-timeout` is applied per model interaction (each provider turn call), not as a cumulative budget for the whole daemon run loop.
 
 ### Output stability
 

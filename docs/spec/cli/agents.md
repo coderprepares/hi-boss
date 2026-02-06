@@ -28,7 +28,7 @@ Flags:
   - `--session-daily-reset-at HH:MM`
   - `--session-idle-timeout <duration>` (units: `d/h/m/s`)
   - `--session-max-context-length <n>`
-- Run timeout:
+- Model interaction timeout:
   - `--run-timeout <duration>` (units: `d/h/m/s`)
 
 Defaults (when flags are omitted):
@@ -79,7 +79,7 @@ Flags:
   - `--session-idle-timeout <duration>` (optional; units: `d/h/m/s`)
   - `--session-max-context-length <n>` (optional)
   - `--clear-session-policy` (optional)
-- Run timeout:
+- Model interaction timeout:
   - `--run-timeout <duration>` (optional; units: `d/h/m/s`)
 - Metadata:
   - `--metadata-json <json>` or `--metadata-file <path>` (optional)
@@ -106,6 +106,9 @@ Output (parseable):
 - Updated fields when present (e.g., `provider:`, `model:`, `reasoning-effort:`, `auto-level:`, `permission-level:`)
 - `run-timeout:` (optional)
 - `bindings:` (optional; comma-separated adapter types)
+
+Semantics:
+- `run-timeout` is applied per model interaction (each provider turn call), not as a cumulative timeout for the whole run loop.
 
 ## `hiboss agent delete`
 

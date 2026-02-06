@@ -19,7 +19,7 @@ Canonical mapping (selected):
 - `envelope.createdAt` → SQLite `created_at` → `created-at:`
 - `envelope.fromBoss` → SQLite `from_boss` → `[boss]` suffix in rendered sender lines
 - `config.bossTimezone` → SQLite `config.boss_timezone` → setup `boss-timezone` → `boss-timezone:`
-- `agent.runTimeout` → SQLite `run_timeout` → `--run-timeout` → `run-timeout:`
+- `agent.runTimeout` → SQLite `run_timeout` → `--run-timeout` → `run-timeout:` (applies per model interaction)
 
 Derived (not stored):
 - `daemon-timezone:` is computed from the daemon host (`Intl.DateTimeFormat().resolvedOptions().timeZone`) and printed by setup for operator clarity.
@@ -180,7 +180,7 @@ Table: `agents` (see `src/daemon/db/schema.ts`)
 | `agent.autoLevel` | `auto_level` | `medium`, `high` (Hi-Boss disallows `low`) |
 | `agent.permissionLevel` | `permission_level` | `restricted`, `standard`, `privileged`, `boss` |
 | `agent.sessionPolicy` | `session_policy` | JSON (nullable) |
-| `agent.runTimeout` | `run_timeout` | Duration string (nullable; default `10m`) |
+| `agent.runTimeout` | `run_timeout` | Duration string (nullable; default `10m`; applied per model interaction) |
 | `agent.createdAt` | `created_at` | Unix epoch ms (UTC) |
 | `agent.lastSeenAt` | `last_seen_at` | Unix epoch ms (UTC) (nullable) |
 | `agent.metadata` | `metadata` | JSON (nullable) |

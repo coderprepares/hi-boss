@@ -23,6 +23,15 @@ Your message here (can include !, quotes, etc.)
 EOF
 ```
 
+**Command strategy (important):**
+- Prefer fast, non-interactive commands first.
+- Avoid privileged/blocking commands unless absolutely necessary (`sudo`, password prompts, heavy system probes).
+- Use explicit short command-level timeouts when possible.
+- For every non-Hi-Boss Bash tool call, include expected runtime in the description (`timeout=8s`, `timeout: 30s`, or `max-time=2m`).
+- Do not add timeout hints to `hiboss ...` commands.
+- If a command times out, switch to a simpler method instead of retrying the same command pattern repeatedly.
+- After a timeout, avoid additional diagnostic shell commands in the same turn; deliver a best-effort answer via `hiboss envelope send`.
+
 **Address formats:**
 - `agent:<name>`
 {% if hasTelegram %}- `channel:telegram:<chatId>` (reply using the incoming `from:` address)

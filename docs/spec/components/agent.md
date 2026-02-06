@@ -188,10 +188,12 @@ Located in `src/agent/executor.ts`:
 2. **Lock**: Per-agent queue lock acquired (no concurrent runs for same agent)
 3. **Session**: Get or create session (see [Session Management](session.md))
 4. **Turn Input**: Format pending envelopes into turn input
-5. **Execute**: Run agent SDK session with turn input
-6. **Auto-Ack**: Mark read envelopes as `done` immediately after they are loaded for a run (at-most-once)
-7. **Audit**: Record run in `agent_runs` table
-8. **Reschedule**: If more pending envelopes exist, schedule another turn via `setImmediate`
+5. **Execute**: Run agent SDK session with turn input (each model interaction uses `run-timeout` as its own timeout budget; not cumulative across retries/recovery turns)
+6. **Tool Timeout Guard**: each tool call has a per-call timeout; on timeout, cancel the in-flight turn and run one recovery turn that asks the model to switch to a faster/non-blocking approach
+7. **Channel Reply Guard** (channel-origin turns): verify the run emitted outbound envelopes back to required `channel:*` sources; if not, run one automatic recovery turn that explicitly requires `hiboss envelope send`
+8. **Auto-Ack**: Mark read envelopes as `done` immediately after they are loaded for a run (at-most-once)
+9. **Audit**: Record run in `agent_runs` table
+10. **Reschedule**: If more pending envelopes exist, schedule another turn via `setImmediate`
 
 ### Constants
 
@@ -229,6 +231,26 @@ Note: each pending envelope is rendered one-by-one (no batching).
 Hi-Boss marks envelopes as `done` immediately after they are read for a run.
 
 This is **at-most-once**: if a run fails, already-read envelopes stay `done` and will not be retried.
+
+### Tool Timeout Guard
+
+To reduce long hangs from blocking shell/system commands, the executor applies a per-tool-call timeout.
+
+- For non-Hi-Boss Bash calls, the model must provide an expected runtime hint (for example `timeout=8s` / `max-time=2m` in tool description); when valid, this hint is used as the per-call timeout.
+- If the timeout hint is missing/invalid, the executor falls back to the default per-call timeout (`AGENT_TOOL_CALL_TIMEOUT_MS`).
+- Hi-Boss CLI commands (`hiboss ...`) are exempt from this tool timeout guard.
+- Timeout measurement starts when that tool call actually begins execution (queue-aware), not when it is first emitted by the model.
+- If a tool call exceeds the timeout, the in-flight turn is cancelled.
+- The executor runs one recovery turn that explicitly asks the model to stop additional diagnostics and send a best-effort reply via `hiboss envelope send`.
+- If the recovery turn still fails, the run is marked failed.
+
+### Channel Reply Guard
+
+For runs triggered by channel envelopes (for example, `from: channel:telegram:<chat-id>`), the executor checks whether the agent sent outbound envelopes to the required channel destination(s) during the same run window.
+
+- If at least one required channel reply is present, the run proceeds normally.
+- If no required channel reply is found, the executor runs one recovery turn with an explicit delivery-only instruction (send now via `hiboss envelope send`).
+- If the recovery turn still does not emit required channel reply envelopes, the run is marked failed instead of silently succeeding.
 
 ## Agent Bindings
 
