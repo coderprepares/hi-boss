@@ -122,7 +122,14 @@ export async function getOrCreateAgentSession(params: {
           ? createRuntime({
             provider: "@anthropic-ai/claude-agent-sdk",
             home: homePath,
-            env: { [HIBOSS_TOKEN_ENV]: agentRecord.token },
+            env: {
+              [HIBOSS_TOKEN_ENV]: agentRecord.token,
+              // Clear env vars inherited from parent Claude Code CLI to avoid
+              // confusing the agent CLI into thinking it's nested inside another
+              // Claude Code instance. The SDK will set ENTRYPOINT to "sdk-ts".
+              CLAUDE_CODE_ENTRYPOINT: undefined,
+              CLAUDECODE: undefined,
+            },
             defaultOpts,
           })
           : createRuntime({
