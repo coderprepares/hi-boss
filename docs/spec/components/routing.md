@@ -116,15 +116,15 @@ See `docs/spec/components/scheduler.md` for the exact wake-up algorithm.
 
 ---
 
-## `/statusmsg` (Telegram)
+## `/verbose` (Telegram)
 
-1. Boss sends `/statusmsg [on|off]` to the Telegram bot.
-2. `TelegramAdapter` emits a `ChannelCommand { command: "statusmsg", ... }`.
+1. Boss sends `/verbose [on|off]` to the Telegram bot.
+2. `TelegramAdapter` emits a `ChannelCommand { command: "verbose", ... }`.
 3. `ChannelBridge` enforces boss-only behavior and resolves which agent is bound to that bot token:
    - if unbound: returns a `not-configured:` + `fix:` message
    - if bound: enriches the command with `agentName`
 4. `Daemon` reads or updates the per-chat status-message toggle:
-   - No args → reply `statusmsg: on|off`
+   - No args → reply `verbose: on|off`
    - `on|off` → persist in `config.telegram_status_message_enabled_<chat-id>`
    - Missing key defaults to `on`
-5. `TelegramAdapter` replies with the resulting `statusmsg: on|off` text.
+5. `TelegramAdapter` replies with the resulting `verbose: on|off` text.

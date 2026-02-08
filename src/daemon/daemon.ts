@@ -89,9 +89,6 @@ export function getSocketPath(config: DaemonConfig = getDefaultConfig()): string
 }
 
 const TELEGRAM_STATUS_MESSAGE_MIN_INTERVAL_MS = 1000;
-const TELEGRAM_STATUS_MESSAGE_MIN_SECTION_CHARS = 64;
-const TELEGRAM_STATUS_MESSAGE_TOOL_MAX_CHARS = 240;
-
 function escapeTelegramHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -100,16 +97,6 @@ function truncateTail(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
   if (maxChars <= 3) return text.slice(-maxChars);
   return `...${text.slice(-(maxChars - 3))}`;
-}
-
-function truncateHead(text: string, maxChars: number): string {
-  if (text.length <= maxChars) return text;
-  if (maxChars <= 3) return text.slice(0, maxChars);
-  return `${text.slice(0, maxChars - 3)}...`;
-}
-
-function collapseWhitespace(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
 }
 
 function redactSensitiveText(text: string): string {
@@ -183,30 +170,19 @@ function allocateSectionBudgets(sections: StatusSection[], available: number): n
   return budgets;
 }
 
-function renderTelegramRunStatusText(thinking: string, assistant: string, tool: string): string {
+function renderTelegramRunStatusText(thinking: string, assistant: string): string {
   const thinkingRaw = thinking.trim();
   const assistantRaw = assistant.trim();
-  const toolRaw = tool.trim();
   const thinkingClean = thinkingRaw && !isNoContentPlaceholder(thinkingRaw) ? thinkingRaw : "";
   const assistantClean = assistantRaw && !isNoContentPlaceholder(assistantRaw) ? assistantRaw : "";
-  const toolClean = toolRaw && !isNoContentPlaceholder(toolRaw) ? toolRaw : "";
-  if (!thinkingClean && !assistantClean && !toolClean) return "";
+  if (!thinkingClean && !assistantClean) return "";
 
   const sections: StatusSection[] = [];
   if (thinkingClean) {
-    sections.push({ text: thinkingClean, open: "<i>", close: "</i>", weight: 3 });
+    sections.push({ text: thinkingClean, open: "<i>", close: "</i>", weight: 1 });
   }
   if (assistantClean) {
-    sections.push({ text: assistantClean, open: "<b>", close: "</b>", weight: 3 });
-  }
-  if (toolClean) {
-    sections.push({
-      text: toolClean,
-      open: "<code>",
-      close: "</code>",
-      weight: 1,
-      maxChars: TELEGRAM_STATUS_MESSAGE_TOOL_MAX_CHARS,
-    });
+    sections.push({ text: assistantClean, open: "<b>", close: "</b>", weight: 1 });
   }
 
   const separator = sections.length > 1 ? "\n\n" : "";
@@ -255,14 +231,6 @@ function getRuntimeMessageText(message: unknown): string | null {
   return typeof text === "string" ? text : null;
 }
 
-type ToolStatus = {
-  name?: string;
-  callId?: string;
-  detail?: string;
-  state: "running" | "done" | "error";
-};
-
-const TOOL_DETAIL_HINT_KEYS = ["command", "cmd", "query", "code", "sql", "url", "path", "text", "input", "prompt"];
 const TOOL_DETAIL_EVENT_KEYS = ["input", "arguments", "args", "toolInput", "parameters", "payload", "command", "code", "query"];
 
 function getEventString(event: Record<string, unknown>, key: string): string | undefined {
@@ -283,56 +251,64 @@ function extractToolCallId(event: Record<string, unknown>): string | undefined {
   return getEventString(event, "callId") ?? getEventString(event, "toolCallId") ?? getEventString(event, "id");
 }
 
+function extractToolCommand(event: Record<string, unknown>): string | undefined {
+  const direct =
+    getEventString(event, "command") ??
+    getEventString(event, "cmd") ??
+    getEventString(event, "query");
+  if (direct && direct.trim()) return direct.trim();
+
+  const input = event.input;
+  if (!input || typeof input !== "object") return undefined;
+  const record = input as Record<string, unknown>;
+  for (const key of ["command", "cmd", "query", "code", "sql", "path", "text"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 function summarizeToolValue(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return null;
-    }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return null;
   }
-  if (typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    for (const key of TOOL_DETAIL_HINT_KEYS) {
-      const candidate = record[key];
-      if (typeof candidate === "string" && candidate.trim()) {
-        return `${key}=${candidate}`;
-      }
-    }
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return null;
-    }
-  }
-  return null;
 }
 
 function extractToolDetail(event: Record<string, unknown>): string | undefined {
   for (const key of TOOL_DETAIL_EVENT_KEYS) {
     if (!(key in event)) continue;
     const summary = summarizeToolValue(event[key]);
-    if (summary) return summary;
+    if (summary) {
+      if (key === "command" || key === "cmd" || key === "query") {
+        return summary;
+      }
+      return `${key}:\n${summary}`;
+    }
   }
   return undefined;
 }
 
-function normalizeToolDetail(detail: string): string {
-  const redacted = redactSensitiveText(detail);
-  const collapsed = collapseWhitespace(redacted);
-  return truncateHead(collapsed, TELEGRAM_STATUS_MESSAGE_TOOL_MAX_CHARS);
+function isHiBossEnvelopeToolCall(event: Record<string, unknown>): boolean {
+  const toolName = extractToolName(event);
+  if (toolName !== "Bash") return false;
+  const command = extractToolCommand(event);
+  return typeof command === "string" && /(^|\s)hiboss\s+envelope(\s|$)/i.test(command);
 }
 
-function formatToolStatus(status: ToolStatus | null): string {
-  if (!status) return "";
-  const name = status.name?.trim();
-  const label = name ? `tool ${name}` : "tool";
-  const stateLabel = status.state === "running" ? "running" : status.state === "error" ? "error" : "done";
-  const detail = status.detail ? `: ${status.detail}` : "";
-  return `${label} (${stateLabel})${detail}`;
+function buildVerboseToolCallMessage(event: Record<string, unknown>): string {
+  const toolName = extractToolName(event)?.trim() || "tool";
+  const callId = extractToolCallId(event);
+  const header = callId ? `tool.call ${toolName} (${callId})` : `tool.call ${toolName}`;
+  const detail = extractToolDetail(event) ?? extractToolCommand(event);
+  if (!detail) return header;
+  return `${header}\n${redactSensitiveText(detail)}`;
 }
 
 /**
@@ -386,10 +362,9 @@ export class Daemon {
 
     let thinkingText = "";
     let assistantText = "";
-    let toolStatus: ToolStatus | null = null;
 
     const updateStatus = (): void => {
-      const text = renderTelegramRunStatusText(thinkingText, assistantText, formatToolStatus(toolStatus));
+      const text = renderTelegramRunStatusText(thinkingText, assistantText);
       if (!text) return;
       status.update(text);
     };
@@ -400,7 +375,7 @@ export class Daemon {
     const handleEvent = (event: { type?: string; [key: string]: unknown }): void => {
       switch (event.type) {
         case "run.started": {
-          const text = renderTelegramRunStatusText(thinkingText, assistantText, formatToolStatus(toolStatus));
+          const text = renderTelegramRunStatusText(thinkingText, assistantText);
           if (text) {
             status.start(text);
           }
@@ -438,40 +413,18 @@ export class Daemon {
         }
         case "tool.call": {
           const toolEvent = event as Record<string, unknown>;
-          const toolName = extractToolName(toolEvent);
-          const detail = extractToolDetail(toolEvent);
-          toolStatus = {
-            name: toolName,
-            callId: extractToolCallId(toolEvent),
-            detail: detail ? normalizeToolDetail(detail) : undefined,
-            state: "running",
-          };
-          updateStatus();
-          break;
-        }
-        case "tool.result": {
-          const toolEvent = event as Record<string, unknown>;
-          const callId = extractToolCallId(toolEvent);
-          if (!toolStatus || !callId || toolStatus.callId === callId) {
-            toolStatus = {
-              name: toolStatus?.name ?? extractToolName(toolEvent),
-              callId: toolStatus?.callId ?? callId,
-              detail: toolStatus?.detail,
-              state: "done",
-            };
-            updateStatus();
+          if (!isHiBossEnvelopeToolCall(toolEvent)) {
+            const toolMessage = buildVerboseToolCallMessage(toolEvent);
+            void adapter
+              .sendMessage(chatId, { text: toolMessage }, { parseMode: "plain" })
+              .catch((err) => {
+                logEvent("warn", "telegram-verbose-tool-message-failed", {
+                  "agent-name": agent.name,
+                  "chat-id": chatId,
+                  error: errorMessage(err),
+                });
+              });
           }
-          break;
-        }
-        case "tool.error": {
-          const toolEvent = event as Record<string, unknown>;
-          toolStatus = {
-            name: toolStatus?.name ?? extractToolName(toolEvent),
-            callId: toolStatus?.callId ?? extractToolCallId(toolEvent),
-            detail: toolStatus?.detail,
-            state: "error",
-          };
-          updateStatus();
           break;
         }
         case "run.completed": {
