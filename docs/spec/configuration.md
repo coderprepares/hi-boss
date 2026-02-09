@@ -123,6 +123,7 @@ Keys:
 - `permission_policy`: JSON permission policy mapping operations → required permission level
 - `adapter_boss_id_<adapter-type>`: boss identity on an adapter, e.g.:
   - `adapter_boss_id_telegram = "your_username"`
+- `telegram_status_message_enabled_<chat-id>`: per-chat Telegram verbose status toggle (`"true"`/`"false"`; default `true`)
 
 What `adapter_boss_id_<adapter-type>` does:
 

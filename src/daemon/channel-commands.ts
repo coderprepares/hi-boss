@@ -6,6 +6,10 @@ import {
   DEFAULT_AGENT_PERMISSION_LEVEL,
   DEFAULT_AGENT_PROVIDER,
 } from "../shared/defaults.js";
+import {
+  getTelegramStatusMessageEnabled,
+  setTelegramStatusMessageEnabled,
+} from "./telegram-status-config.js";
 import { formatUnixMsAsTimeZoneOffset } from "../shared/time.js";
 import { formatShortId } from "../shared/id-format.js";
 
@@ -123,6 +127,26 @@ export function createChannelCommandHandler(params: {
         `cleared-pending-count: ${clearedPendingCount}`,
       ];
       return { text: lines.join("\n") };
+    }
+
+    if (c.command === "verbose") {
+      const chatId = c.chatId;
+      if (!chatId) return;
+
+      const arg = (c.args ?? "").trim().toLowerCase();
+      const current = getTelegramStatusMessageEnabled(params.db, chatId);
+
+      if (!arg) {
+        return { text: "verbose: " + (current ? "on" : "off") };
+      }
+
+      if (arg === "on" || arg === "off") {
+        const enabled = arg === "on";
+        setTelegramStatusMessageEnabled(params.db, chatId, enabled);
+        return { text: "verbose: " + (enabled ? "on" : "off") };
+      }
+
+      return { text: "error: usage /verbose on|off" };
     }
   };
 }

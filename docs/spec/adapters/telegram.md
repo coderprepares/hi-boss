@@ -52,8 +52,33 @@ The Telegram adapter connects Hi-Boss to Telegram bots, enabling agents to commu
 | `/new` | Refresh the bound agent session (boss-only) |
 | `/status` | Show `hiboss agent status` for the bound agent (boss-only) |
 | `/abort` | Cancel current run + clear due pending inbox for the bound agent (boss-only) |
+| `/verbose` | Toggle per-chat verbose streaming (boss-only) |
 
 Commands are boss-only: non-boss users get no reply.
+
+### Verbose streaming (Telegram)
+
+When enabled, Telegram receives extra run-time progress messages for channel-triggered runs:
+
+- Verbose messages are emitted per event stream (thinking / assistant / tool).
+- If a message is still in progress, that specific message is edited in-place until complete.
+- `typing` is sent only while model interaction is active, and is stopped once interaction ends.
+- Tool calls are sent as concise single-line messages (for example: `🛠 WebSearch THB CNY exchange rate ...`).
+- Tool completion is appended as a concise summary on the same message:
+  - success: `✅ ...` (prefers tool result `content`)
+  - error: `❌ ...`
+  - long content is truncated.
+- Status/progress lines are prefixed with icons to separate verbose output from normal assistant replies:
+  - `💭` thinking/reasoning
+  - `🤖` assistant content
+  - `🛠️` tool call events
+  - `📡` runtime events/errors
+
+Per-chat command:
+
+- `/verbose` → returns `verbose: on|off`
+- `/verbose on` → enable
+- `/verbose off` → disable
 
 ## Limitations
 

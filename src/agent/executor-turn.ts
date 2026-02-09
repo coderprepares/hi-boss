@@ -2,13 +2,32 @@ import type { RunHandle } from "@unified-agent-sdk/runtime";
 import type { AgentSession, TurnTokenUsage } from "./executor-support.js";
 import { readTokenUsage } from "./executor-support.js";
 
+export type RuntimeEvent = {
+  type?: string;
+  [key: string]: unknown;
+};
+
+export interface ExecuteUnifiedTurnOptions {
+  signal?: AbortSignal;
+  onRunHandle?: (handle: RunHandle) => void;
+  onEvent?: (event: RuntimeEvent) => void | Promise<void>;
+}
+
+function notifyEvent(handler: (event: RuntimeEvent) => void | Promise<void>, event: RuntimeEvent): void {
+  try {
+    const maybePromise = handler(event);
+    if (maybePromise && typeof (maybePromise as Promise<void>).catch === "function") {
+      (maybePromise as Promise<void>).catch(() => undefined);
+    }
+  } catch {
+    // Swallow callback errors so they cannot interrupt the run.
+  }
+}
+
 export async function executeUnifiedTurn(
   session: AgentSession,
   turnInput: string,
-  options?: {
-    signal?: AbortSignal;
-    onRunHandle?: (handle: RunHandle) => void;
-  }
+  options: ExecuteUnifiedTurnOptions = {}
 ): Promise<{ status: "success" | "cancelled"; finalText: string; usage: TurnTokenUsage }> {
   const config = options?.signal ? { signal: options.signal } : undefined;
 
@@ -19,9 +38,12 @@ export async function executeUnifiedTurn(
 
   options?.onRunHandle?.(runHandle);
 
-  // Drain events silently (required for run completion)
-  for await (const _ of runHandle.events) {
+  // Drain events (required for run completion)
+  for await (const event of runHandle.events) {
     // Events must be consumed for the run to complete
+    if (options.onEvent) {
+      notifyEvent(options.onEvent, event as RuntimeEvent);
+    }
   }
 
   const result = await runHandle.result;
