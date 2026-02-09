@@ -1,13 +1,10 @@
-/**
- * Hi-Boss daemon - manages agents, messages, and platform integrations.
- */
-
 import * as path from "path";
 import { HiBossDatabase } from "./db/database.js";
 import { IpcServer } from "./ipc/server.js";
 import { MessageRouter } from "./router/message-router.js";
 import { ChannelBridge } from "./bridges/channel-bridge.js";
 import { AgentExecutor, createAgentExecutor } from "../agent/executor.js";
+import type { AgentRunStatusReporterFactory } from "../agent/executor.js";
 import type { Agent } from "../agent/types.js";
 import { EnvelopeScheduler } from "./scheduler/envelope-scheduler.js";
 import { CronScheduler } from "./scheduler/cron-scheduler.js";
@@ -41,34 +38,19 @@ import {
   createAgentDeleteHandler,
 } from "./rpc/index.js";
 import { createChannelCommandHandler } from "./channel-commands.js";
+import { createTelegramRunStatusReporter } from "./telegram-verbose.js";
 
 // Re-export for CLI and external use
 export { isDaemonRunning, isSocketAcceptingConnections };
 
-/**
- * Hi-Boss daemon configuration.
- */
 export interface DaemonConfig {
-  /**
-   * Hi-Boss root directory (user-facing).
-   *
-   * Default: `~/hiboss` (override via `HIBOSS_DIR`).
-   */
   dataDir: string;
-  /**
-   * Internal daemon directory (hidden).
-   *
-   * Default: `{{dataDir}}/.daemon`.
-   */
   daemonDir: string;
   boss?: {
     telegram?: string;
   };
 }
 
-/**
- * Default configuration paths.
- */
 export function getDefaultConfig(): DaemonConfig {
   const paths = getHiBossPaths();
   return {
@@ -77,16 +59,10 @@ export function getDefaultConfig(): DaemonConfig {
   };
 }
 
-/**
- * Get socket path for IPC client.
- */
 export function getSocketPath(config: DaemonConfig = getDefaultConfig()): string {
   return path.join(config.daemonDir, "daemon.sock");
 }
 
-/**
- * Hi-Boss daemon - manages agents, messages, and platform integrations.
- */
 export class Daemon {
   private db: HiBossDatabase;
   private ipc: IpcServer;
@@ -100,6 +76,14 @@ export class Daemon {
   private startTimeMs: number | null = null;
   private pidLock: PidLock;
   private defaultPermissionPolicy: PermissionPolicyV1 = DEFAULT_PERMISSION_POLICY;
+  private createRunStatusReporter: AgentRunStatusReporterFactory = ({ agent, envelopes }) => {
+    return createTelegramRunStatusReporter({
+      db: this.db,
+      adapters: this.adapters,
+      agent,
+      envelopes,
+    });
+  };
 
   constructor(private config: DaemonConfig = getDefaultConfig()) {
     const dbPath = path.join(config.daemonDir, "hiboss.db");
@@ -117,6 +101,7 @@ export class Daemon {
       db: this.db,
       hibossDir: config.dataDir,
       onEnvelopesDone: (envelopeIds) => this.cronScheduler?.onEnvelopesDone(envelopeIds),
+      createRunStatusReporter: this.createRunStatusReporter,
     });
     this.scheduler = new EnvelopeScheduler(this.db, this.router, this.executor);
     this.cronScheduler = new CronScheduler(this.db, this.scheduler);
@@ -158,7 +143,6 @@ export class Daemon {
    * Create the DaemonContext for RPC handlers.
    */
   private createContext(): DaemonContext {
-    // Important: `running`/`startTimeMs` must reflect live daemon state (daemon.status depends on it).
     const daemon = this;
     return {
       db: this.db,
@@ -183,60 +167,35 @@ export class Daemon {
     };
   }
 
-  /**
-   * Start the daemon.
-   */
   async start(): Promise<void> {
     if (this.running) {
       throw new Error("Daemon is already running");
     }
 
-    // Acquire flock-based PID lock (single-instance enforcement).
     await this.pidLock.acquire();
 
     try {
-      // Start IPC server
       await this.ipc.start();
-
-      // Mark as running early so stop() can clean up partial startups.
       this.running = true;
       this.startTimeMs = Date.now();
-
-      // All displayed timestamps (including daemon logs) use the boss timezone.
       setDaemonLogTimeZone(this.db.getBossTimezone());
 
       const daemonMode = (process.env.HIBOSS_DAEMON_MODE ?? "").trim().toLowerCase();
       const examplesMode = daemonMode === "examples";
       if (examplesMode) {
-        // IPC-only daemon for generating deterministic docs (no schedulers/adapters/auto-execution).
         logEvent("info", "daemon-started", { "data-dir": this.config.dataDir, "adapters-count": 0, mode: "examples" });
         return;
       }
-
-      // Set up command handler for /new etc.
       this.setupCommandHandler();
-
-      // Load bindings and create adapters
       await this.loadBindings();
-
-      // Register agent handlers for auto-execution
       await this.registerAgentExecutionHandlers();
-
-      // Start all loaded adapters
       for (const adapter of this.adapters.values()) {
         await adapter.start();
       }
-
-      // Cron: skip missed runs before any startup delivery/turn triggers.
       this.cronScheduler?.reconcileAllSchedules({ skipMisfires: true });
-
-      // Start scheduler after adapters/handlers are ready
       this.scheduler.start();
-
-      // Process any pending envelopes from before restart
       await this.processPendingEnvelopes();
     } catch (err) {
-      // Best-effort cleanup to avoid leaving stale pid/socket files.
       await this.stop().catch(() => {});
       await this.pidLock.release();
       this.running = false;
@@ -249,16 +208,10 @@ export class Daemon {
     });
   }
 
-  /**
-   * Set up command handler for adapter commands.
-   */
   private setupCommandHandler(): void {
     this.bridge.setCommandHandler(createChannelCommandHandler({ db: this.db, executor: this.executor }));
   }
 
-  /**
-   * Register handlers for all agents to trigger execution on new envelopes.
-   */
   private async registerAgentExecutionHandlers(): Promise<void> {
     const agents = this.db.listAgents();
 
@@ -267,9 +220,6 @@ export class Daemon {
     }
   }
 
-  /**
-   * Register a single agent handler for auto-execution.
-   */
   private registerSingleAgentHandler(agentName: string): void {
     this.router.registerAgentHandler(agentName, async (envelope) => {
       const currentAgent = this.db.getAgentByName(agentName);
@@ -278,7 +228,6 @@ export class Daemon {
         return;
       }
 
-      // Non-blocking: trigger agent run
       this.executor.checkAndRun(currentAgent, this.db, {
         kind: "envelope",
         source: getEnvelopeSourceFromEnvelope(envelope),
@@ -292,9 +241,6 @@ export class Daemon {
     });
   }
 
-  /**
-   * Process any pending envelopes that existed before daemon restart.
-   */
   private async processPendingEnvelopes(): Promise<void> {
     const agents = this.db.listAgents();
 
@@ -311,9 +257,6 @@ export class Daemon {
     }
   }
 
-  /**
-   * Load bindings from database and create adapters.
-   */
   private async loadBindings(): Promise<void> {
     const bindings = this.db.listBindings();
 
@@ -322,14 +265,10 @@ export class Daemon {
     }
   }
 
-  /**
-   * Create an adapter for a binding.
-   */
   private async createAdapterForBinding(
     adapterType: string,
     adapterToken: string
   ): Promise<ChatAdapter | null> {
-    // Check if adapter already exists
     if (this.adapters.has(adapterToken)) {
       return this.adapters.get(adapterToken)!;
     }
@@ -355,9 +294,6 @@ export class Daemon {
     return adapter;
   }
 
-  /**
-   * Remove an adapter.
-   */
   private async removeAdapter(adapterToken: string): Promise<void> {
     const adapter = this.adapters.get(adapterToken);
     if (adapter) {
@@ -366,46 +302,25 @@ export class Daemon {
     }
   }
 
-  /**
-   * Stop the daemon.
-   */
   async stop(): Promise<void> {
     if (!this.running) return;
-
-    // Stop scheduler first (prevents new work while shutting down)
     this.scheduler.stop();
-
-    // Stop all adapters
     for (const adapter of this.adapters.values()) {
       await adapter.stop();
     }
-
-    // Close agent executor
     await this.executor.closeAll();
-
-    // Stop IPC server
     await this.ipc.stop();
-
-    // Close database
     this.db.close();
-
-    // Release flock-based PID lock
     await this.pidLock.release();
 
     this.running = false;
     logEvent("info", "daemon-stopped");
   }
 
-  /**
-   * Check if daemon is running.
-   */
   isRunning(): boolean {
     return this.running;
   }
 
-  /**
-   * Register all RPC methods using extracted handlers.
-   */
   private registerRpcMethods(): void {
     const ctx = this.createContext();
 

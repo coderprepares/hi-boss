@@ -17,12 +17,155 @@ import {
 } from "./codex-rollout.js";
 import { parseClaudeOutput, parseCodexOutput } from "./provider-cli-parsers.js";
 
+export type RuntimeEvent = {
+  type?: string;
+  [key: string]: unknown;
+};
+
 export interface CliTurnResult {
   status: "success" | "cancelled";
   finalText: string;
   usage: TurnTokenUsage;
   /** Session/thread ID extracted from output (for resume). */
   sessionId?: string;
+}
+
+function notifyEvent(handler: (event: RuntimeEvent) => void | Promise<void>, event: RuntimeEvent): void {
+  try {
+    const maybePromise = handler(event);
+    if (maybePromise && typeof (maybePromise as Promise<void>).catch === "function") {
+      (maybePromise as Promise<void>).catch(() => undefined);
+    }
+  } catch {
+    // Swallow callback errors so they cannot interrupt the run.
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function extractTextFromContent(content: unknown): string {
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => asRecord(part))
+    .filter((part): part is Record<string, unknown> => Boolean(part))
+    .filter((part) => part.type === "text" || part.type === "output_text")
+    .map((part) => (typeof part.text === "string" ? part.text : ""))
+    .join("");
+}
+
+function normalizeProviderEvent(event: Record<string, unknown>): RuntimeEvent[] {
+  const eventType = typeof event.type === "string" ? event.type : "";
+  if (!eventType) return [];
+
+  if (eventType === "assistant") {
+    const message = asRecord(event.message);
+    if (!message) return [];
+    const assistantText =
+      (typeof message.text === "string" ? message.text : "") ||
+      extractTextFromContent(message.content);
+
+    const mapped: RuntimeEvent[] = [];
+    if (assistantText.trim()) {
+      mapped.push({ type: "assistant.message", message: { text: assistantText } });
+    }
+
+    const content = Array.isArray(message.content) ? message.content : [];
+    for (const partRaw of content) {
+      const part = asRecord(partRaw);
+      if (!part) continue;
+      const partType = typeof part.type === "string" ? part.type : "";
+      if (partType === "thinking" && typeof part.thinking === "string" && part.thinking.trim()) {
+        mapped.push({ type: "assistant.reasoning.message", message: { text: part.thinking } });
+      }
+      if (partType === "tool_use") {
+        mapped.push({
+          type: "tool.call",
+          toolName: typeof part.name === "string" ? part.name : "tool",
+          callId: typeof part.id === "string" ? part.id : undefined,
+          input: part.input,
+        });
+      }
+    }
+    return mapped;
+  }
+
+  if (eventType === "user") {
+    const message = asRecord(event.message);
+    if (!message || !Array.isArray(message.content)) return [];
+    const mapped: RuntimeEvent[] = [];
+    for (const partRaw of message.content) {
+      const part = asRecord(partRaw);
+      if (!part || part.type !== "tool_result") continue;
+      const isError = part.is_error === true;
+      mapped.push({
+        type: isError ? "tool.error" : "tool.result",
+        callId: typeof part.tool_use_id === "string" ? part.tool_use_id : undefined,
+        output: { content: part.content },
+        is_error: isError,
+      });
+    }
+    return mapped;
+  }
+
+  if (eventType === "item.completed") {
+    const item = asRecord(event.item);
+    if (!item) return [];
+    const itemType = typeof item.type === "string" ? item.type : "";
+
+    if (itemType === "agent_message") {
+      const assistantText =
+        (typeof item.text === "string" ? item.text : "") ||
+        extractTextFromContent(item.content);
+      return assistantText.trim()
+        ? [{ type: "assistant.message", message: { text: assistantText } }]
+        : [];
+    }
+
+    if (itemType === "reasoning") {
+      const reasoningText =
+        (typeof item.text === "string" ? item.text : "") ||
+        (typeof item.summary === "string" ? item.summary : "");
+      return reasoningText.trim()
+        ? [{ type: "assistant.reasoning.message", message: { text: reasoningText } }]
+        : [];
+    }
+
+    if (itemType === "tool_call") {
+      return [{
+        type: "tool.call",
+        toolName:
+          (typeof item.tool_name === "string" ? item.tool_name : null) ??
+          (typeof item.name === "string" ? item.name : "tool"),
+        callId:
+          (typeof item.call_id === "string" ? item.call_id : null) ??
+          (typeof item.id === "string" ? item.id : undefined),
+        input: item.input ?? item.arguments ?? item.command,
+      }];
+    }
+
+    if (itemType === "tool_result" || itemType === "tool_error") {
+      const isError = itemType === "tool_error" || item.is_error === true;
+      return [{
+        type: isError ? "tool.error" : "tool.result",
+        callId:
+          (typeof item.call_id === "string" ? item.call_id : null) ??
+          (typeof item.id === "string" ? item.id : undefined),
+        output: { content: item.output ?? item.result ?? item.content },
+        error: isError ? (item.error ?? item.output ?? item.result ?? item.content) : undefined,
+      }];
+    }
+  }
+
+  if (eventType === "result" && event.subtype === "success") {
+    return [{
+      type: "run.completed",
+      finalText: typeof event.result === "string" ? event.result : "",
+    }];
+  }
+
+  return [];
 }
 
 /**
@@ -115,6 +258,7 @@ export async function executeCliTurn(
     agentName: string;
     signal?: AbortSignal;
     onChildProcess?: (proc: ChildProcess) => void;
+    onEvent?: (event: RuntimeEvent) => void | Promise<void>;
   },
 ): Promise<CliTurnResult> {
   const { hibossDir, agentName, signal } = options;
@@ -138,6 +282,47 @@ export async function executeCliTurn(
   delete env.CODEX_HOME;
 
   return new Promise<CliTurnResult>((resolve, reject) => {
+    const emitEvent = (event: RuntimeEvent): void => {
+      if (!options.onEvent) return;
+      notifyEvent(options.onEvent, event);
+    };
+
+    emitEvent({ type: "run.started" });
+
+    let stdoutLineBuffer = "";
+    let runCompletedEmitted = false;
+    const handleStdoutLine = (line: string): void => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      try {
+        const parsedLine = JSON.parse(trimmed) as Record<string, unknown>;
+        const normalizedEvents = normalizeProviderEvent(parsedLine);
+        for (const event of normalizedEvents) {
+          if (event.type === "run.completed") {
+            runCompletedEmitted = true;
+          }
+          emitEvent(event);
+        }
+      } catch {
+        // Ignore non-JSON lines.
+      }
+    };
+
+    const processStdoutChunk = (chunkText: string, flush = false): void => {
+      stdoutLineBuffer += chunkText;
+      while (true) {
+        const newLineIndex = stdoutLineBuffer.indexOf("\n");
+        if (newLineIndex < 0) break;
+        const line = stdoutLineBuffer.slice(0, newLineIndex);
+        stdoutLineBuffer = stdoutLineBuffer.slice(newLineIndex + 1);
+        handleStdoutLine(line);
+      }
+      if (flush && stdoutLineBuffer.trim()) {
+        handleStdoutLine(stdoutLineBuffer);
+        stdoutLineBuffer = "";
+      }
+    };
+
     let cancelled = false;
     let stdoutChunks: Buffer[] = [];
     let stderrChunks: Buffer[] = [];
@@ -162,6 +347,7 @@ export async function executeCliTurn(
 
     child.stdout?.on("data", (chunk: Buffer) => {
       stdoutChunks.push(chunk);
+      processStdoutChunk(chunk.toString("utf-8"));
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
@@ -198,6 +384,7 @@ export async function executeCliTurn(
 
       const stdout = Buffer.concat(stdoutChunks).toString("utf-8");
       const stderr = Buffer.concat(stderrChunks).toString("utf-8");
+      processStdoutChunk("", true);
 
       if (cancelled) {
         resolve({
@@ -290,12 +477,18 @@ export async function executeCliTurn(
             usage: parsed.usage,
             sessionId: parsed.sessionId,
           });
+          if (!runCompletedEmitted) {
+            emitEvent({ type: "run.completed", finalText: parsed.finalText });
+          }
         })().catch((err) => {
           logEvent("warn", "agent-codex-context-length-enrich-failed", {
             "agent-name": agentName,
             provider: session.provider,
             error: errorMessage(err),
           });
+          if (!runCompletedEmitted) {
+            emitEvent({ type: "run.completed", finalText: parsed.finalText });
+          }
           resolve({
             status: "success",
             finalText: parsed.finalText,
