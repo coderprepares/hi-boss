@@ -106,6 +106,18 @@ export class TelegramAdapter implements ChatAdapter {
       await this.dispatchCommand(ctx, "abort");
     });
 
+    this.bot.command("cancel", async (ctx) => {
+      await this.dispatchCommand(ctx, "cancel");
+    });
+
+    this.bot.command("queue", async (ctx) => {
+      await this.dispatchCommand(ctx, "queue");
+    });
+
+    this.bot.command("reaction", async (ctx) => {
+      await this.dispatchCommand(ctx, "reaction");
+    });
+
     this.bot.on("text", (ctx) => this.handleMessage(ctx as unknown as MessageContext));
     this.bot.on("photo", (ctx) => this.handleMessage(ctx as unknown as MessageContext));
     this.bot.on("video", (ctx) => this.handleMessage(ctx as unknown as MessageContext));

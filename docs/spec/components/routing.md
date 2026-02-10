@@ -31,7 +31,7 @@ The daemon owns:
 Adapters provide two main streams into the daemon:
 
 - `ChannelMessage` (chat messages)
-- `ChannelCommand` (e.g. Telegram `/new`)
+- `ChannelCommand` (e.g. Telegram `/new`, `/reaction`)
 
 See `docs/spec/adapters/telegram.md`.
 
@@ -52,7 +52,7 @@ See `docs/spec/adapters/telegram.md`.
      - `metadata = { platform, channelMessageId, author, chat }`
 4. `MessageRouter.routeEnvelope()` persists the envelope in SQLite (`status = pending`).
 5. If the envelope is due now (no `deliver-at`, or `deliver-at <= now`), the router calls `deliverEnvelope()`.
-6. For agent destinations, `deliverToAgent()` triggers the registered handler, which calls `AgentExecutor.checkAndRun(...)`.
+6. For agent destinations, `deliverToAgent()` triggers the registered handler. Daemon always applies a trailing debounce (`ENVELOPE_TRIGGER_DEBOUNCE_MS = 500`) before `AgentExecutor.checkAndRun(...)` to coalesce burst messages. With `/queue off`, each new message also sends an immediate cancel-only interrupt for the in-flight run, then waits for the debounce window before triggering the next run.
 7. `AgentExecutor` loads pending envelopes from SQLite, marks them `done` immediately, and runs the agent (at-most-once).
 
 If no binding exists:
@@ -128,3 +128,45 @@ See `docs/spec/components/scheduler.md` for the exact wake-up algorithm.
    - `on|off` → persist in `config.telegram_status_message_enabled_<chat-id>`
    - Missing key defaults to `on`
 5. `TelegramAdapter` replies with the resulting `verbose: on|off` text.
+
+---
+
+## `/reaction` (Telegram)
+
+1. Boss sends `/reaction [on|off]` to the Telegram bot.
+2. `TelegramAdapter` emits a `ChannelCommand { command: "reaction", args, ... }`.
+3. `ChannelBridge` enforces boss-only behavior and resolves the chat binding.
+4. `Daemon` reads/writes per-chat config key:
+   - `config.telegram_reaction_enabled_<chat-id>`
+   - Missing key defaults to `off`
+5. `TelegramAdapter` replies with `reaction: on|off`.
+
+When enabled:
+
+- envelopes read for a run are reacted with `👀`.
+- if run status is `success`, those source messages are reacted with `🎉`.
+
+---
+
+## `/queue` (Telegram)
+
+1. Boss sends `/queue [on|off]` to the Telegram bot.
+2. `TelegramAdapter` emits a `ChannelCommand { command: "queue", args, ... }`.
+3. `ChannelBridge` enforces boss-only behavior and resolves the bound `agentName`.
+4. `Daemon` reads/writes per-agent config key:
+   - `config.telegram_queue_mode_enabled_<agent-name>`
+   - Missing key defaults to `on`
+5. `TelegramAdapter` replies with `queue: on|off`.
+
+Daemon always uses a trailing `500ms` debounce for envelope-triggered runs.
+
+When `queue: off`, each new incoming message also sends an immediate cancel-only interrupt (`AgentExecutor.abortCurrentRun`) if a run is in-flight, then waits for the debounce window and triggers the next run.
+
+---
+
+## `/cancel` (Telegram)
+
+1. Boss sends `/cancel` to the Telegram bot.
+2. `Daemon` calls `AgentExecutor.abortCurrentRun(agentName, "telegram:/cancel")`.
+3. Pending inbox is preserved (pending envelopes are not cleared).
+4. `TelegramAdapter` replies with `cancel: ok` and `cancelled-run: true|false`.

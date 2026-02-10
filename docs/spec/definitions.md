@@ -21,6 +21,8 @@ Canonical mapping (selected):
 - `envelope.fromBoss` → SQLite `from_boss` → `[boss]` suffix in rendered sender lines
 - `config.bossTimezone` → SQLite `config.boss_timezone` → setup `boss-timezone` → `boss-timezone:`
 - `config.telegramStatusMessageEnabledByChatId` → SQLite `config.telegram_status_message_enabled_<chat-id>` → `/verbose on|off`
+- `config.telegramReactionEnabledByChatId` → SQLite `config.telegram_reaction_enabled_<chat-id>` → `/reaction on|off`
+- `config.telegramQueueModeEnabledByAgent` → SQLite `config.telegram_queue_mode_enabled_<agent-name>` → `/queue on|off`
 
 Derived (not stored):
 - `daemon-timezone:` is computed from the daemon host (`Intl.DateTimeFormat().resolvedOptions().timeZone`) and printed by setup for operator clarity.

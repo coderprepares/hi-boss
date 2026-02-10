@@ -38,6 +38,7 @@ import {
   createAgentDeleteHandler,
 } from "./rpc/index.js";
 import { createChannelCommandHandler } from "./channel-commands.js";
+import { getTelegramQueueModeEnabled } from "./telegram-queue-config.js";
 import { createTelegramRunStatusReporter } from "./telegram-verbose.js";
 
 // Re-export for CLI and external use
@@ -63,6 +64,8 @@ export function getSocketPath(config: DaemonConfig = getDefaultConfig()): string
   return path.join(config.daemonDir, "daemon.sock");
 }
 
+const ENVELOPE_TRIGGER_DEBOUNCE_MS = 500;
+
 export class Daemon {
   private db: HiBossDatabase;
   private ipc: IpcServer;
@@ -72,6 +75,7 @@ export class Daemon {
   private scheduler: EnvelopeScheduler;
   private cronScheduler: CronScheduler | null = null;
   private adapters: Map<string, ChatAdapter> = new Map(); // token -> adapter
+  private pendingQueueInterruptTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private running = false;
   private startTimeMs: number | null = null;
   private pidLock: PidLock;
@@ -220,24 +224,67 @@ export class Daemon {
     }
   }
 
+  private triggerEnvelopeRun(params: {
+    agentName: string;
+    source: ReturnType<typeof getEnvelopeSourceFromEnvelope>;
+    envelopeId: string;
+  }): void {
+    const currentAgent = this.db.getAgentByName(params.agentName);
+    if (!currentAgent) {
+      logEvent("error", "agent-not-found", { "agent-name": params.agentName });
+      return;
+    }
+
+    this.executor.checkAndRun(currentAgent, this.db, {
+      kind: "envelope",
+      source: params.source,
+      envelopeId: params.envelopeId,
+    }).catch((err) => {
+      logEvent("error", "agent-check-and-run-failed", {
+        "agent-name": params.agentName,
+        error: errorMessage(err),
+      });
+    });
+  }
+
+  private scheduleDebouncedEnvelopeRun(params: {
+    agentName: string;
+    source: ReturnType<typeof getEnvelopeSourceFromEnvelope>;
+    envelopeId: string;
+  }): void {
+    const existingTimer = this.pendingQueueInterruptTimers.get(params.agentName);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+
+    const timer = setTimeout(() => {
+      this.pendingQueueInterruptTimers.delete(params.agentName);
+      this.triggerEnvelopeRun(params);
+    }, ENVELOPE_TRIGGER_DEBOUNCE_MS);
+
+    this.pendingQueueInterruptTimers.set(params.agentName, timer);
+  }
+
+  private clearPendingQueueInterruptTimers(): void {
+    for (const timer of this.pendingQueueInterruptTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.pendingQueueInterruptTimers.clear();
+  }
+
   private registerSingleAgentHandler(agentName: string): void {
     this.router.registerAgentHandler(agentName, async (envelope) => {
-      const currentAgent = this.db.getAgentByName(agentName);
-      if (!currentAgent) {
-        logEvent("error", "agent-not-found", { "agent-name": agentName });
-        return;
-      }
-
-      this.executor.checkAndRun(currentAgent, this.db, {
-        kind: "envelope",
+      const params = {
+        agentName,
         source: getEnvelopeSourceFromEnvelope(envelope),
         envelopeId: envelope.id,
-      }).catch((err) => {
-        logEvent("error", "agent-check-and-run-failed", {
-          "agent-name": agentName,
-          error: errorMessage(err),
-        });
-      });
+      };
+
+      if (!getTelegramQueueModeEnabled(this.db, agentName)) {
+        this.executor.abortCurrentRun(agentName, "telegram:/queue-auto");
+      }
+
+      this.scheduleDebouncedEnvelopeRun(params);
     });
   }
 
@@ -305,6 +352,7 @@ export class Daemon {
   async stop(): Promise<void> {
     if (!this.running) return;
     this.scheduler.stop();
+    this.clearPendingQueueInterruptTimers();
     for (const adapter of this.adapters.values()) {
       await adapter.stop();
     }
