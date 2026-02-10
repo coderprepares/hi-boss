@@ -185,18 +185,20 @@ Located in:
 Located in `src/agent/executor.ts`:
 
 1. **Trigger**: New envelope arrives, a scheduled envelope becomes due, or the daemon starts with pending work
-2. **Lock**: Per-agent queue lock acquired (no concurrent runs for same agent)
-3. **Session**: Get or create session (see [Session Management](session.md))
-4. **Turn Input**: Format pending envelopes into turn input
-5. **Execute**: Run agent SDK session with turn input
-6. **Auto-Ack**: Mark read envelopes as `done` immediately after they are loaded for a run (at-most-once)
-7. **Audit**: Record run in `agent_runs` table
-8. **Reschedule**: If more pending envelopes exist, schedule another turn via `setImmediate`
+2. **Debounce + Queue Mode**: Envelope-triggered runs always use trailing debounce (`ENVELOPE_TRIGGER_DEBOUNCE_MS`). Telegram `/queue` controls whether new messages also send immediate cancel-only interrupt to in-flight runs: `on` (default) no auto-interrupt; `off` auto-interrupts and then waits for debounce before the next run trigger
+3. **Lock**: Per-agent queue lock acquired (no concurrent runs for same agent)
+4. **Session**: Get or create session (see [Session Management](session.md))
+5. **Turn Input**: Format pending envelopes into turn input
+6. **Execute**: Run agent SDK session with turn input
+7. **Auto-Ack**: Mark read envelopes as `done` immediately after they are loaded for a run (at-most-once)
+8. **Audit**: Record run in `agent_runs` table
+9. **Reschedule**: If more pending envelopes exist, schedule another turn
 
 ### Constants
 
 | Constant | Value | Description |
 |----------|-------|-------------|
+| `ENVELOPE_TRIGGER_DEBOUNCE_MS` | 500 | Trailing debounce window for all envelope-triggered runs |
 | `MAX_ENVELOPES_PER_TURN` | 10 | Maximum envelopes processed per turn |
 
 ### Turn Input Format
@@ -284,10 +286,12 @@ All agent executions are recorded in the `agent_runs` table.
 
 ### Cancellation
 
-An agent run can be cancelled by the boss (for example via Telegram `/abort` or `hiboss agent abort`).
+An agent run can be cancelled by the boss (for example via Telegram `/cancel`, Telegram `/abort`, or `hiboss agent abort`).
 
 Semantics:
 - A cancelled run is terminal and is recorded as `status = cancelled`.
+- `/cancel` is cancel-only: pending inbox is kept.
+- `/abort` and `hiboss agent abort` cancel current run and clear due pending non-cron inbox.
 - Already-read envelopes remain `done` (at-most-once); cancelled runs do not retry.
 
 ### Querying Runs

@@ -6,7 +6,9 @@ import type { AgentRunStatusReporter } from "../agent/executor.js";
 import type { Agent } from "../agent/types.js";
 import type { Envelope } from "../envelope/types.js";
 import { errorMessage, logEvent } from "../shared/daemon-log.js";
+import { formatTelegramMessageIdCompact } from "../shared/telegram-message-id.js";
 import type { HiBossDatabase } from "./db/database.js";
+import { getTelegramReactionEnabled } from "./telegram-reaction-config.js";
 import { getTelegramStatusMessageEnabled } from "./telegram-status-config.js";
 import {
   buildVerboseToolMessage,
@@ -132,6 +134,27 @@ function sendVerboseMessage(params: {
   });
 }
 
+function getTelegramSourceMessageIds(envelopes: Envelope[]): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+
+  for (const envelope of envelopes) {
+    if (!envelope.from.startsWith("channel:telegram:")) continue;
+    if (!envelope.metadata || typeof envelope.metadata !== "object") continue;
+
+    const channelMessageId = (envelope.metadata as Record<string, unknown>).channelMessageId;
+    if (typeof channelMessageId !== "string" || !channelMessageId.trim()) continue;
+
+    const compact = formatTelegramMessageIdCompact(channelMessageId.trim());
+    if (!compact || seen.has(compact)) continue;
+
+    seen.add(compact);
+    ids.push(compact);
+  }
+
+  return ids;
+}
+
 export function createTelegramRunStatusReporter(params: {
   db: HiBossDatabase;
   adapters: Map<string, ChatAdapter>;
@@ -147,7 +170,38 @@ export function createTelegramRunStatusReporter(params: {
   const adapter = params.adapters.get(binding.adapterToken);
   if (!adapter || !(adapter instanceof TelegramAdapter)) return undefined;
 
-  if (!getTelegramStatusMessageEnabled(params.db, chatId)) return undefined;
+  const statusEnabled = getTelegramStatusMessageEnabled(params.db, chatId);
+  const reactionEnabled = getTelegramReactionEnabled(params.db, chatId);
+  if (!statusEnabled && !reactionEnabled) return undefined;
+
+  const sourceMessageIds = reactionEnabled ? getTelegramSourceMessageIds(params.envelopes) : [];
+  const setAutoReaction = (emoji: string): void => {
+    if (!reactionEnabled || sourceMessageIds.length === 0) return;
+
+    for (const messageId of sourceMessageIds) {
+      void adapter.setReaction(chatId, messageId, emoji).catch((err) => {
+        logEvent("warn", "telegram-auto-reaction-failed", {
+          "agent-name": params.agent.name,
+          "chat-id": chatId,
+          "channel-message-id": messageId,
+          emoji,
+          error: errorMessage(err),
+        });
+      });
+    }
+  };
+
+  setAutoReaction("👀");
+
+  if (!statusEnabled) {
+    return {
+      finish: ({ status: runStatus }) => {
+        if (runStatus === "success") {
+          setAutoReaction("🎉");
+        }
+      },
+    };
+  }
 
   const typing = adapter.createTypingIndicator(chatId);
 
@@ -336,6 +390,10 @@ export function createTelegramRunStatusReporter(params: {
       }
 
       finishPendingToolStreams();
+
+      if (runStatus === "success") {
+        setAutoReaction("🎉");
+      }
 
       if (runStatus === "error" && error) {
         sendVerboseMessage({

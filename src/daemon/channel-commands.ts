@@ -10,6 +10,14 @@ import {
   getTelegramStatusMessageEnabled,
   setTelegramStatusMessageEnabled,
 } from "./telegram-status-config.js";
+import {
+  getTelegramQueueModeEnabled,
+  setTelegramQueueModeEnabled,
+} from "./telegram-queue-config.js";
+import {
+  getTelegramReactionEnabled,
+  setTelegramReactionEnabled,
+} from "./telegram-reaction-config.js";
 import { formatUnixMsAsTimeZoneOffset } from "../shared/time.js";
 import { formatShortId } from "../shared/id-format.js";
 
@@ -127,6 +135,53 @@ export function createChannelCommandHandler(params: {
         `cleared-pending-count: ${clearedPendingCount}`,
       ];
       return { text: lines.join("\n") };
+    }
+
+    if (c.command === "cancel" && typeof c.agentName === "string" && c.agentName) {
+      const cancelledRun = params.executor.abortCurrentRun(c.agentName, "telegram:/cancel");
+      const lines = [
+        "cancel: ok",
+        `agent-name: ${c.agentName}`,
+        `cancelled-run: ${cancelledRun ? "true" : "false"}`,
+      ];
+      return { text: lines.join("\n") };
+    }
+
+    if (c.command === "queue" && typeof c.agentName === "string" && c.agentName) {
+      const arg = (c.args ?? "").trim().toLowerCase();
+      const current = getTelegramQueueModeEnabled(params.db, c.agentName);
+
+      if (!arg) {
+        return { text: "queue: " + (current ? "on" : "off") };
+      }
+
+      if (arg === "on" || arg === "off") {
+        const enabled = arg === "on";
+        setTelegramQueueModeEnabled(params.db, c.agentName, enabled);
+        return { text: "queue: " + (enabled ? "on" : "off") };
+      }
+
+      return { text: "error: usage /queue on|off" };
+    }
+
+    if (c.command === "reaction") {
+      const chatId = c.chatId;
+      if (!chatId) return;
+
+      const arg = (c.args ?? "").trim().toLowerCase();
+      const current = getTelegramReactionEnabled(params.db, chatId);
+
+      if (!arg) {
+        return { text: "reaction: " + (current ? "on" : "off") };
+      }
+
+      if (arg === "on" || arg === "off") {
+        const enabled = arg === "on";
+        setTelegramReactionEnabled(params.db, chatId, enabled);
+        return { text: "reaction: " + (enabled ? "on" : "off") };
+      }
+
+      return { text: "error: usage /reaction on|off" };
     }
 
     if (c.command === "verbose") {

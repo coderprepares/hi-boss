@@ -51,8 +51,11 @@ The Telegram adapter connects Hi-Boss to Telegram bots, enabling agents to commu
 |---------|-------------|
 | `/new` | Refresh the bound agent session (boss-only) |
 | `/status` | Show `hiboss agent status` for the bound agent (boss-only) |
+| `/queue` | Toggle per-agent queue mode (boss-only; default on) |
+| `/cancel` | Cancel current run only (boss-only; keeps pending inbox) |
 | `/abort` | Cancel current run + clear due pending inbox for the bound agent (boss-only) |
 | `/verbose` | Toggle per-chat verbose streaming (boss-only) |
+| `/reaction` | Toggle per-chat auto-reactions (boss-only; default off) |
 
 Commands are boss-only: non-boss users get no reply.
 
@@ -79,6 +82,37 @@ Per-chat command:
 - `/verbose` → returns `verbose: on|off`
 - `/verbose on` → enable
 - `/verbose off` → disable
+
+### Auto-reactions (Telegram)
+
+Per-chat command (default is `off`):
+
+- `/reaction` → returns `reaction: on|off`
+- `/reaction on` → enable auto-reactions
+- `/reaction off` → disable auto-reactions
+
+Behavior:
+
+- when enabled, envelopes read for a run are marked with `👀`.
+- when the run finishes with `success`, those envelopes are marked with `🎉`.
+
+### Queue mode (Telegram)
+
+Per-agent command (default is `on`):
+
+- `/queue` → returns `queue: on|off`
+- `/queue on` → enable queue mode (normal queueing)
+- `/queue off` → disable queue mode (enable auto-interrupt)
+
+Behavior:
+
+- `queue: on` (default): daemon still uses trailing debounce (`500ms`) to coalesce new messages, but does not auto-cancel in-flight runs.
+- `queue: off`: on each new message, daemon sends immediate cancel-only interrupt to any in-flight run, then uses trailing debounce (`500ms`) and triggers the next run so due pending messages are merged in one turn input.
+
+Cancellation commands:
+
+- `/cancel` → cancel-only (keeps pending inbox).
+- `/abort` → cancel + clear due pending non-cron inbox.
 
 ## Limitations
 
