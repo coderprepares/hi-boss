@@ -157,5 +157,5 @@ export function buildVerboseToolMessage(event: Record<string, unknown>): string 
   const toolName = typeof event.toolName === "string" ? event.toolName.trim() : "tool";
   const summary = extractToolInputSummary(event);
   if (!summary) return toolName;
-  return `${toolName} ${redactSensitiveText(summary)}`;
+  return `${toolName}: ${redactSensitiveText(summary)}`;
 }
