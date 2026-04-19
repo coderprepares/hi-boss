@@ -26,7 +26,7 @@ const STATUS_MIN_INTERVAL_MS = 400;
 
 type VerboseState = {
   historyLines: string[];
-  statusMessage: TelegramStatusMessage;
+  statusMessage: TelegramStatusMessage | null;
   typingIndicator: ReturnType<TelegramAdapter["createTypingIndicator"]>;
   started: boolean;
 };
@@ -36,6 +36,8 @@ function renderHistory(lines: string[]): string {
 }
 
 function pushHistoryLine(state: VerboseState, line: string): void {
+  if (!state.statusMessage) return;
+
   state.historyLines = appendVerboseHistoryLine(state.historyLines, line);
   const rendered = renderHistory(state.historyLines);
   if (!rendered.trim()) return;
@@ -64,15 +66,17 @@ export function createTelegramRunStatusReporter(params: {
   const adapter = params.adapters.get(binding.adapterToken);
   if (!adapter || !(adapter instanceof TelegramAdapter)) return undefined;
 
-  if (!getTelegramVerboseEnabled(params.db, context.chatId)) return undefined;
+  const verboseEnabled = getTelegramVerboseEnabled(params.db, context.chatId);
 
   const state: VerboseState = {
     historyLines: [],
-    statusMessage: adapter.createStatusMessage(context.chatId, {
-      minIntervalMs: STATUS_MIN_INTERVAL_MS,
-      maxChars: TELEGRAM_MAX_TEXT_CHARS,
-      ...(context.replyToMessageId ? { replyToMessageId: context.replyToMessageId } : {}),
-    }),
+    statusMessage: verboseEnabled
+      ? adapter.createStatusMessage(context.chatId, {
+          minIntervalMs: STATUS_MIN_INTERVAL_MS,
+          maxChars: TELEGRAM_MAX_TEXT_CHARS,
+          ...(context.replyToMessageId ? { replyToMessageId: context.replyToMessageId } : {}),
+        })
+      : null,
     typingIndicator: adapter.createTypingIndicator(context.chatId),
     started: false,
   };
@@ -85,7 +89,9 @@ export function createTelegramRunStatusReporter(params: {
 
       if (event.type === "turn.started") {
         state.typingIndicator.start();
-        pushHistoryLine(state, buildRunLifecycleLine("run started"));
+        if (verboseEnabled) {
+          pushHistoryLine(state, buildRunLifecycleLine("run started"));
+        }
         return;
       }
 
@@ -103,6 +109,7 @@ export function createTelegramRunStatusReporter(params: {
 
       const commandExecution = extractCommandExecutionSummary(item);
       if (commandExecution) {
+        if (!verboseEnabled) return;
         if (event.type === "item.started") {
           pushHistoryLine(state, buildCommandStartLine(commandExecution.command));
         } else {
@@ -116,12 +123,14 @@ export function createTelegramRunStatusReporter(params: {
 
       const assistantText = extractAgentMessageText(item);
       if (assistantText) {
+        if (!verboseEnabled) return;
         if (event.type === "item.completed") {
           pushHistoryLine(state, buildAssistantPreviewLine(assistantText));
         }
         return;
       }
 
+      if (!verboseEnabled) return;
       const itemType = extractItemType(item);
       pushHistoryLine(state, buildItemLifecycleLine(itemType, event.type === "item.started" ? "started" : "completed"));
     },
@@ -135,9 +144,11 @@ export function createTelegramRunStatusReporter(params: {
             ? buildRunLifecycleLine(error ?? "run cancelled", "cancelled")
             : buildRunLifecycleLine(error ?? "run failed", "error");
 
-      pushHistoryLine(state, finalLine);
+      if (verboseEnabled) {
+        pushHistoryLine(state, finalLine);
+      }
 
-      if (!state.started) return;
+      if (!state.statusMessage || !state.started) return;
 
       try {
         state.statusMessage.finish(renderHistory(state.historyLines));

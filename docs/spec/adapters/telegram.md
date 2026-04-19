@@ -42,9 +42,10 @@ Telegram chat commands are boss-only (non-boss users get no reply):
 
 Verbose mode notes:
 - Default is `off`.
+- Telegram `typing` is sent during bound-agent runs even when verbose mode is `off`.
 - When enabled, Hi-Boss keeps a single Telegram status message updated during a run for the current chat.
 - The status message shows a compact history of run lifecycle events, command execution start/completion, and generic item lifecycle updates.
-- Hi-Boss also keeps Telegram `typing` active while the run is in progress.
+- Verbose mode adds execution visibility; it does not control whether `typing` is sent.
 - The final agent reply still arrives through normal envelope delivery; verbose mode is an additional execution trace, not a replacement for the final reply.
 
 ## Limits and behavior (canonical)
