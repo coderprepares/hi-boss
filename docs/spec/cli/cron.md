@@ -20,6 +20,10 @@ Flags:
 - `--attachment <path>` (repeatable)
 - `--parse-mode <mode>` (optional; channel destinations only; `plain|markdownv2|html`)
 
+Notes:
+- For agent-originated Telegram deliveries created by cron schedules, omitted `--parse-mode` defaults to `markdownv2`.
+- Use `--parse-mode html` when the scheduled Telegram message needs HTML-only entities such as `<u>`, `<blockquote>`, or `<tg-spoiler>`.
+
 Output (parseable):
 
 ```

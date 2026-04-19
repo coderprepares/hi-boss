@@ -144,3 +144,38 @@ test("Telegram outgoing local media group includes filename for each document", 
     b.cleanup();
   }
 });
+
+test("Telegram outgoing markdownv2 text is converted before send", async () => {
+  let capturedText = "";
+  let capturedExtra: unknown = undefined;
+
+  await sendTelegramMessage(
+    {
+      sendMessage: async (_chatId, text, extra) => {
+        capturedText = text;
+        capturedExtra = extra;
+      },
+      sendPhoto: async () => {
+        throw new Error("unexpected sendPhoto");
+      },
+      sendVideo: async () => {
+        throw new Error("unexpected sendVideo");
+      },
+      sendAudio: async () => {
+        throw new Error("unexpected sendAudio");
+      },
+      sendDocument: async () => {
+        throw new Error("unexpected sendDocument");
+      },
+      callApi: async () => {
+        throw new Error("unexpected callApi");
+      },
+    },
+    "123",
+    { text: "能看到 **加粗** 和 `code()`." },
+    { parseMode: "markdownv2" }
+  );
+
+  assert.equal(capturedText, "能看到 *加粗* 和 `code()`\\.");
+  assert.equal((capturedExtra as { parse_mode?: string }).parse_mode, "MarkdownV2");
+});

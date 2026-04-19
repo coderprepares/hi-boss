@@ -120,7 +120,47 @@ test("channel delivery ignores legacy metadata.replyToMessageId and still sends"
   assert.equal(adapter.calls.length, 1);
   assert.equal(adapter.calls[0]?.chatId, "chat-1");
   assert.equal(adapter.calls[0]?.options?.replyToMessageId, undefined);
+  assert.equal(adapter.calls[0]?.options?.parseMode, "markdownv2");
   assert.deepEqual(db.statusUpdates, [{ id: "child-legacy", status: "done" }]);
+});
+
+test("channel delivery defaults agent telegram replies to markdownv2", async () => {
+  const db = new FakeDb("telegram", "token-1");
+  const adapter = new FakeTelegramAdapter();
+  const router = new MessageRouter(db as unknown as HiBossDatabase);
+  router.registerAdapter(adapter, "token-1");
+
+  const outgoing = makeEnvelope({
+    id: "child-default-mode",
+    from: "agent:nex",
+    to: "channel:telegram:chat-1",
+  });
+
+  await router.deliverEnvelope(outgoing);
+
+  assert.equal(adapter.calls.length, 1);
+  assert.equal(adapter.calls[0]?.options?.parseMode, "markdownv2");
+  assert.deepEqual(db.statusUpdates, [{ id: "child-default-mode", status: "done" }]);
+});
+
+test("channel delivery respects explicit parseMode override for telegram", async () => {
+  const db = new FakeDb("telegram", "token-1");
+  const adapter = new FakeTelegramAdapter();
+  const router = new MessageRouter(db as unknown as HiBossDatabase);
+  router.registerAdapter(adapter, "token-1");
+
+  const outgoing = makeEnvelope({
+    id: "child-plain-mode",
+    from: "agent:nex",
+    to: "channel:telegram:chat-1",
+    metadata: { parseMode: "plain" },
+  });
+
+  await router.deliverEnvelope(outgoing);
+
+  assert.equal(adapter.calls.length, 1);
+  assert.equal(adapter.calls[0]?.options?.parseMode, "plain");
+  assert.deepEqual(db.statusUpdates, [{ id: "child-plain-mode", status: "done" }]);
 });
 
 for (const scenario of [

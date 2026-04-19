@@ -100,7 +100,7 @@ envelope
   .option("--text <text>", "Envelope text (use - to read from stdin)")
   .option("--text-file <path>", "Read envelope text from file")
   .option("--attachment <path>", "Attachment path (can be used multiple times)", collect, [])
-  .option("--parse-mode <mode>", "Parse mode (Telegram): plain (default), html (recommended), markdownv2")
+  .option("--parse-mode <mode>", "Parse mode (Telegram): auto|plain|html|markdownv2")
   .option(
     "--reply-to <envelope-id>",
     "Reply to an envelope (optional; provides thread context; may quote for channels when possible)"
@@ -114,8 +114,9 @@ envelope
     [
       "",
       "Notes:",
-      "  - Default is plain text. Use --parse-mode html for long or formatted messages (bold/italic/links; structured blocks via <pre>/<code>, incl. ASCII tables).",
-      "  - Use --parse-mode markdownv2 only if you can escape special characters correctly.",
+      "  - For agent-originated Telegram sends, omitted parse mode defaults to MarkdownV2 with automatic Telegram-safe escaping.",
+      "  - Use --parse-mode html when you need Telegram HTML entities such as <u>, <blockquote>, <tg-spoiler>, or explicit <a>/<pre><code> blocks.",
+      "  - Use --parse-mode markdownv2 only if you can escape special characters correctly yourself.",
       "  - Most Telegram users reply without quoting; only use --reply-to when it prevents confusion (busy groups, multiple questions).",
       "",
     ].join("\n")
@@ -232,10 +233,16 @@ cron
   .option("--text <text>", "Envelope text (use - to read from stdin)")
   .option("--text-file <path>", "Read envelope text from file")
   .option("--attachment <path>", "Attachment path (can be used multiple times)", collect, [])
-  .option("--parse-mode <mode>", "Parse mode (Telegram): plain (default), html (recommended), markdownv2")
+  .option("--parse-mode <mode>", "Parse mode (Telegram): auto|plain|html|markdownv2")
   .addHelpText(
     "after",
-    ["", "Notes:", "  - For formatting guidance, see: hiboss envelope send --help", ""].join("\n")
+    [
+      "",
+      "Notes:",
+      "  - For agent-originated Telegram deliveries, omitted parse mode defaults to MarkdownV2.",
+      "  - For formatting guidance, see: hiboss envelope send --help",
+      "",
+    ].join("\n")
   )
   .action((options) => {
     createCron({

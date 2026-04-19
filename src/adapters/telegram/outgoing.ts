@@ -3,6 +3,7 @@ import * as path from "path";
 import type { Attachment, MessageContent, SendMessageOptions } from "../types.js";
 import { detectAttachmentType } from "../types.js";
 import { parseTelegramMessageId } from "../../shared/telegram-message-id.js";
+import { formatTelegramTextForParseMode } from "./markdown-v2.js";
 import {
   isReplyToMessageNotFound,
   splitTextForTelegram,
@@ -104,6 +105,7 @@ function resolveSourceForMediaGroup(attachment: Attachment): string | { source: 
 
 async function sendTextMessages(telegram: TelegramOutgoingApi, chatId: string, text: string, options: SendMessageOptions = {}): Promise<void> {
   const telegramParseMode = toTelegramParseMode(options.parseMode);
+  const formattedText = formatTelegramTextForParseMode(text, options.parseMode);
   const replyParameters =
     options.replyToMessageId && options.replyToMessageId.trim()
       ? {
@@ -111,7 +113,7 @@ async function sendTextMessages(telegram: TelegramOutgoingApi, chatId: string, t
         }
       : undefined;
 
-  const chunks = splitTextForTelegram(text, TELEGRAM_MAX_TEXT_CHARS);
+  const chunks = splitTextForTelegram(formattedText, TELEGRAM_MAX_TEXT_CHARS);
 
   for (let i = 0; i < chunks.length; i++) {
     const extra = {
@@ -152,10 +154,11 @@ async function sendAttachment(
         }
       : undefined;
 
+  const formattedCaption = typeof caption === "string" ? formatTelegramTextForParseMode(caption, options.parseMode) : caption;
   const safeCaption =
-    typeof caption === "string" && caption.length > TELEGRAM_MAX_CAPTION_CHARS
-      ? caption.slice(0, TELEGRAM_MAX_CAPTION_CHARS)
-      : caption;
+    typeof formattedCaption === "string" && formattedCaption.length > TELEGRAM_MAX_CAPTION_CHARS
+      ? formattedCaption.slice(0, TELEGRAM_MAX_CAPTION_CHARS)
+      : formattedCaption;
 
   const extra: Record<string, unknown> = {
     ...(safeCaption ? { caption: safeCaption } : {}),
@@ -227,8 +230,12 @@ export async function sendTelegramMessage(
 ): Promise<void> {
   const { text, attachments } = content;
   const telegramParseMode = toTelegramParseMode(options.parseMode);
+  const formattedText = typeof text === "string" ? formatTelegramTextForParseMode(text, options.parseMode) : undefined;
   const hasText = typeof text === "string" && text.trim().length > 0;
-  const captionTooLong = hasText && text.length > TELEGRAM_MAX_CAPTION_CHARS;
+  const captionTooLong =
+    hasText &&
+    typeof formattedText === "string" &&
+    formattedText.length > TELEGRAM_MAX_CAPTION_CHARS;
 
   const replyParameters =
     options.replyToMessageId && options.replyToMessageId.trim()
@@ -269,7 +276,7 @@ export async function sendTelegramMessage(
 
           const mediaSource = resolveSourceForMediaGroup(attachment) as unknown;
           const isFirstItemOverall = chunkIndex === 0 && idx === 0;
-          const caption = isFirstItemOverall && hasText && !captionTooLong ? text : undefined;
+          const caption = isFirstItemOverall && hasText && !captionTooLong ? formattedText : undefined;
 
           const item: Record<string, unknown> = { type: mediaType, media: mediaSource };
           if (caption) {
@@ -328,7 +335,7 @@ export async function sendTelegramMessage(
 
     for (const attachment of attachments) {
       const isFirst = !replied;
-      const caption = attachments.length === 1 ? text : undefined;
+      const caption = attachments.length === 1 ? formattedText : undefined;
       await sendAttachment(telegram, chatId, attachment, caption, {
         parseMode: options.parseMode,
         replyToMessageId: isFirst ? options.replyToMessageId : undefined,

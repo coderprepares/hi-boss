@@ -231,7 +231,7 @@ export class MessageRouter {
       });
     }
 
-    const parseMode = this.getOutgoingParseMode(envelope);
+    const parseMode = this.getOutgoingParseMode(envelope, adapterType);
     const replyToMessageId = this.getOutgoingReplyToMessageId(envelope, adapterType, chatId);
 
     try {
@@ -301,11 +301,24 @@ export class MessageRouter {
     }
   }
 
-  private getOutgoingParseMode(envelope: Envelope): OutgoingParseMode | undefined {
+  private getOutgoingParseMode(envelope: Envelope, adapterType: string): OutgoingParseMode | undefined {
     const md = envelope.metadata;
-    if (!md || typeof md !== "object") return undefined;
-    const v = (md as Record<string, unknown>).parseMode;
-    if (v === "plain" || v === "markdownv2" || v === "html") return v;
+    if (md && typeof md === "object") {
+      const v = (md as Record<string, unknown>).parseMode;
+      if (v === "plain" || v === "markdownv2" || v === "html") return v;
+    }
+
+    if (adapterType !== "telegram") return undefined;
+
+    try {
+      const from = parseAddress(envelope.from);
+      if (from.type === "agent") {
+        return "markdownv2";
+      }
+    } catch {
+      return undefined;
+    }
+
     return undefined;
   }
 

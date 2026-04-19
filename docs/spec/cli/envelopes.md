@@ -23,6 +23,8 @@ Notes:
 - Sender identity is derived from the authenticated **agent token**.
 - Boss tokens cannot send envelopes via `hiboss envelope send`; to message an agent as a human/boss, send via a channel adapter (e.g., Telegram).
 - Sending to `agent:<name>` fails fast if the agent does not exist (`NOT_FOUND`) or the address is invalid (`INVALID_PARAMS`).
+- When sending from an agent to a Telegram channel and `--parse-mode` is omitted, Hi-Boss defaults to `markdownv2` and applies Telegram-safe formatting conversion automatically.
+- Use `--parse-mode html` when you need Telegram HTML-only entities such as `<u>`, `<blockquote>`, or `<tg-spoiler>`.
 
 Output (parseable):
 
