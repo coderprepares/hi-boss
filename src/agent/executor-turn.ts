@@ -17,6 +17,22 @@ import {
 } from "./codex-rollout.js";
 import { parseClaudeOutput, parseCodexOutput } from "./provider-cli-parsers.js";
 
+export type RuntimeEvent = {
+  type?: string;
+  [key: string]: unknown;
+};
+
+function notifyEvent(handler: (event: RuntimeEvent) => void | Promise<void>, event: RuntimeEvent): void {
+  try {
+    const maybePromise = handler(event);
+    if (maybePromise && typeof (maybePromise as Promise<void>).catch === "function") {
+      (maybePromise as Promise<void>).catch(() => undefined);
+    }
+  } catch {
+    // Swallow callback errors so they cannot interrupt the run.
+  }
+}
+
 export interface CliTurnResult {
   status: "success" | "cancelled";
   finalText: string;
@@ -115,6 +131,7 @@ export async function executeCliTurn(
     agentName: string;
     signal?: AbortSignal;
     onChildProcess?: (proc: ChildProcess) => void;
+    onEvent?: (event: RuntimeEvent) => void | Promise<void>;
   },
 ): Promise<CliTurnResult> {
   const { hibossDir, agentName, signal } = options;
@@ -141,6 +158,33 @@ export async function executeCliTurn(
     let cancelled = false;
     let stdoutChunks: Buffer[] = [];
     let stderrChunks: Buffer[] = [];
+    let stdoutLineBuffer = "";
+
+    const emitStdoutLineEvent = (line: string): void => {
+      const trimmed = line.trim();
+      if (!trimmed || !options.onEvent) return;
+
+      try {
+        const event = JSON.parse(trimmed) as RuntimeEvent;
+        notifyEvent(options.onEvent, event);
+      } catch {
+        // Ignore non-JSON lines.
+      }
+    };
+
+    const processStdoutChunk = (chunk: Buffer): void => {
+      if (!options.onEvent) return;
+
+      stdoutLineBuffer += chunk.toString("utf-8");
+      while (true) {
+        const newlineIndex = stdoutLineBuffer.indexOf("\n");
+        if (newlineIndex < 0) return;
+
+        const line = stdoutLineBuffer.slice(0, newlineIndex);
+        stdoutLineBuffer = stdoutLineBuffer.slice(newlineIndex + 1);
+        emitStdoutLineEvent(line);
+      }
+    };
 
     const child = spawn(cmd, args, {
       cwd: session.workspace,
@@ -162,6 +206,7 @@ export async function executeCliTurn(
 
     child.stdout?.on("data", (chunk: Buffer) => {
       stdoutChunks.push(chunk);
+      processStdoutChunk(chunk);
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
@@ -198,6 +243,11 @@ export async function executeCliTurn(
 
       const stdout = Buffer.concat(stdoutChunks).toString("utf-8");
       const stderr = Buffer.concat(stderrChunks).toString("utf-8");
+
+      if (stdoutLineBuffer.trim()) {
+        emitStdoutLineEvent(stdoutLineBuffer);
+        stdoutLineBuffer = "";
+      }
 
       if (cancelled) {
         resolve({

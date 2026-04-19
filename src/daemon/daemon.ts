@@ -28,6 +28,7 @@ import {
 } from "../shared/permissions.js";
 import { errorMessage, logEvent, setDaemonLogTimeZone } from "../shared/daemon-log.js";
 import { getEnvelopeSourceFromEnvelope } from "../envelope/source.js";
+import type { Envelope } from "../envelope/types.js";
 import { PidLock, isDaemonRunning, isSocketAcceptingConnections } from "./pid-lock.js";
 import type { DaemonContext, Principal } from "./rpc/context.js";
 import { rpcError } from "./rpc/context.js";
@@ -43,6 +44,7 @@ import {
 } from "./rpc/index.js";
 import { createChannelCommandHandler } from "./channel-commands.js";
 import { buildMissingAgentRolesGuidance } from "../shared/agent-role.js";
+import { createTelegramRunStatusReporter } from "./telegram-verbose.js";
 import {
   getSpeakerBindingIntegrity,
   hasSpeakerBindingIntegrityViolations,
@@ -104,6 +106,13 @@ export class Daemon {
   private scheduler: EnvelopeScheduler;
   private cronScheduler: CronScheduler | null = null;
   private adapters: Map<string, ChatAdapter> = new Map(); // token -> adapter
+  private createRunStatusReporter = ({ agent, envelopes }: { agent: Agent; envelopes: Envelope[] }) =>
+    createTelegramRunStatusReporter({
+      db: this.db,
+      adapters: this.adapters,
+      agent,
+      envelopes,
+    });
   private running = false;
   private startTimeMs: number | null = null;
   private pidLock: PidLock;
@@ -125,6 +134,7 @@ export class Daemon {
       db: this.db,
       hibossDir: config.dataDir,
       onEnvelopesDone: (envelopeIds) => this.cronScheduler?.onEnvelopesDone(envelopeIds),
+      createRunStatusReporter: this.createRunStatusReporter,
     });
     this.backgroundExecutor = createBackgroundExecutor({ db: this.db, router: this.router });
     this.scheduler = new EnvelopeScheduler(this.db, this.router, this.executor);

@@ -22,6 +22,10 @@ export function setDaemonDebugEnabled(enabled: boolean): void {
   debugEnabled = enabled;
 }
 
+export function isDaemonDebugEnabled(): boolean {
+  return debugEnabled;
+}
+
 export function setDaemonLogTimeZone(timeZone: string): void {
   const trimmed = timeZone.trim();
   if (!trimmed) return;

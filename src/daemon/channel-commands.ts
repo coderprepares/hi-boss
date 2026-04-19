@@ -1,6 +1,7 @@
 import type { ChannelCommand, ChannelCommandHandler, MessageContent } from "../adapters/types.js";
 import type { HiBossDatabase } from "./db/database.js";
 import type { AgentExecutor } from "../agent/executor.js";
+import { getTelegramVerboseEnabled, setTelegramVerboseEnabled } from "./telegram-status-config.js";
 import {
   DEFAULT_AGENT_PERMISSION_LEVEL,
   DEFAULT_AGENT_PROVIDER,
@@ -121,6 +122,23 @@ export function createChannelCommandHandler(params: {
         `cleared-pending-count: ${clearedPendingCount}`,
       ];
       return { text: lines.join("\n") };
+    }
+
+    if (c.command === "verbose") {
+      const current = getTelegramVerboseEnabled(params.db, c.chatId);
+      const arg = c.args.trim().toLowerCase();
+
+      if (!arg) {
+        return { text: `verbose: ${current ? "on" : "off"}` };
+      }
+
+      if (arg === "on" || arg === "off") {
+        const enabled = arg === "on";
+        setTelegramVerboseEnabled(params.db, c.chatId, enabled);
+        return { text: `verbose: ${enabled ? "on" : "off"}` };
+      }
+
+      return { text: "error: usage /verbose on|off" };
     }
   };
 }

@@ -36,6 +36,16 @@ Telegram chat commands are boss-only (non-boss users get no reply):
 - `/new` — request a session refresh for the bound agent
 - `/status` — show `hiboss agent status` for the bound agent
 - `/abort` — cancel current run + clear **due** pending inbox for the bound agent
+- `/verbose` — show current verbose state for this chat
+- `/verbose on` — enable runtime status updates for this chat
+- `/verbose off` — disable runtime status updates for this chat
+
+Verbose mode notes:
+- Default is `off`.
+- When enabled, Hi-Boss keeps a single Telegram status message updated during a run for the current chat.
+- The status message shows a compact history of run lifecycle events, command execution start/completion, and generic item lifecycle updates.
+- Hi-Boss also keeps Telegram `typing` active while the run is in progress.
+- The final agent reply still arrives through normal envelope delivery; verbose mode is an additional execution trace, not a replacement for the final reply.
 
 ## Limits and behavior (canonical)
 

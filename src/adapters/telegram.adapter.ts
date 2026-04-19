@@ -11,6 +11,8 @@ import { getHiBossPaths } from "../shared/hiboss-paths.js";
 import { parseTelegramMessageId } from "../shared/telegram-message-id.js";
 import { buildTelegramChannelMessage, type MessageContext } from "./telegram/incoming.js";
 import { sendTelegramMessage } from "./telegram/outgoing.js";
+import { TelegramStatusMessage, type TelegramStatusMessageOptions } from "./telegram/status-message.js";
+import { TelegramTypingIndicator, type TelegramTypingIndicatorOptions } from "./telegram/typing-indicator.js";
 import {
   computeBackoff,
   isGetUpdatesConflict,
@@ -100,6 +102,10 @@ export class TelegramAdapter implements ChatAdapter {
       await this.dispatchCommand(ctx, "abort");
     });
 
+    this.bot.command("verbose", async (ctx) => {
+      await this.dispatchCommand(ctx, "verbose");
+    });
+
     this.bot.on("text", (ctx) => this.handleMessage(ctx as unknown as MessageContext));
     this.bot.on("photo", (ctx) => this.handleMessage(ctx as unknown as MessageContext));
     this.bot.on("video", (ctx) => this.handleMessage(ctx as unknown as MessageContext));
@@ -123,6 +129,14 @@ export class TelegramAdapter implements ChatAdapter {
 
   async sendMessage(chatId: string, content: MessageContent, options: SendMessageOptions = {}): Promise<void> {
     await sendTelegramMessage(this.bot.telegram as any, chatId, content, options);
+  }
+
+  createStatusMessage(chatId: string, options: TelegramStatusMessageOptions = {}): TelegramStatusMessage {
+    return new TelegramStatusMessage(this.bot.telegram as any, chatId, options);
+  }
+
+  createTypingIndicator(chatId: string, options: TelegramTypingIndicatorOptions = {}): TelegramTypingIndicator {
+    return new TelegramTypingIndicator(this.bot.telegram as any, chatId, options);
   }
 
   onMessage(handler: ChannelMessageHandler): void {

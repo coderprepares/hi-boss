@@ -4,6 +4,7 @@
 import type { ChildProcess } from "node:child_process";
 import type { Agent } from "./types.js";
 import type { HiBossDatabase } from "../daemon/db/database.js";
+import type { Envelope } from "../envelope/types.js";
 import { getHiBossDir } from "./home-setup.js";
 import { buildTurnInput } from "./turn-input.js";
 import {
@@ -19,7 +20,7 @@ import { writePersistedAgentSession } from "./persisted-session.js";
 import type { AgentRunTrigger } from "./executor-triggers.js";
 import { getTriggerFields } from "./executor-triggers.js";
 import { countDuePendingEnvelopesForAgent } from "./executor-db.js";
-import { executeCliTurn } from "./executor-turn.js";
+import { executeCliTurn, type RuntimeEvent } from "./executor-turn.js";
 import { getOrCreateAgentSession } from "./executor-session.js";
 
 /**
@@ -34,6 +35,18 @@ type InFlightAgentRun = {
   abortReason?: string;
 };
 
+export type AgentRunStatusReporter = {
+  onEvent?: (event: RuntimeEvent) => void | Promise<void>;
+  finish?: (result: { status: "success" | "error" | "cancelled"; error?: string }) => void | Promise<void>;
+};
+
+export type AgentRunStatusReporterFactory = (params: {
+  agent: Agent;
+  db: HiBossDatabase;
+  runId: string;
+  envelopes: Envelope[];
+}) => AgentRunStatusReporter | undefined;
+
 /**
  * Agent executor manages agent sessions and runs.
  */
@@ -45,17 +58,20 @@ export class AgentExecutor {
   private db: HiBossDatabase | null;
   private hibossDir: string;
   private onEnvelopesDone?: (envelopeIds: string[], db: HiBossDatabase) => void | Promise<void>;
+  private createRunStatusReporter?: AgentRunStatusReporterFactory;
 
   constructor(
     options: {
       db?: HiBossDatabase;
       hibossDir?: string;
       onEnvelopesDone?: (envelopeIds: string[], db: HiBossDatabase) => void | Promise<void>;
+      createRunStatusReporter?: AgentRunStatusReporterFactory;
     } = {}
   ) {
     this.db = options.db ?? null;
     this.hibossDir = options.hibossDir ?? getHiBossDir();
     this.onEnvelopesDone = options.onEnvelopesDone;
+    this.createRunStatusReporter = options.createRunStatusReporter;
   }
 
   /**
@@ -207,6 +223,25 @@ export class AgentExecutor {
     const run = db.createAgentRun(agent.name, envelopeIds);
     const triggerFields = getTriggerFields(trigger);
     let runStartedAtMs: number | null = null;
+    const reporter = this.createRunStatusReporter
+      ? this.createRunStatusReporter({ agent, db, runId: run.id, envelopes })
+      : undefined;
+
+    const finishReporter = async (
+      status: "success" | "error" | "cancelled",
+      error?: string
+    ): Promise<void> => {
+      if (!reporter?.finish) return;
+      try {
+        await reporter.finish({ status, error });
+      } catch (err) {
+        logEvent("warn", "agent-run-status-finish-failed", {
+          "agent-name": agent.name,
+          "agent-run-id": run.id,
+          error: errorMessage(err),
+        });
+      }
+    };
 
     const inFlight: InFlightAgentRun = {
       runRecordId: run.id,
@@ -260,11 +295,13 @@ export class AgentExecutor {
         onChildProcess: (proc) => {
           inFlight.childProcess = proc;
         },
+        onEvent: reporter?.onEvent,
       });
 
       if (turn.status === "cancelled") {
         const reason = inFlight.abortReason ?? "run-cancelled";
         db.cancelAgentRun(run.id, reason);
+        await finishReporter("cancelled", reason);
         logEvent("info", "agent-run-complete", {
           "agent-name": agent.name,
           "agent-run-id": run.id,
@@ -324,6 +361,7 @@ export class AgentExecutor {
         "cache-write-tokens": turn.usage.cacheWriteTokens,
         "total-tokens": turn.usage.totalTokens,
       });
+      await finishReporter("success");
 
       // Context-length refresh: if a run grew the context too large, reset the session for the next run.
       const policy = this.getSessionPolicy(agent);
@@ -341,6 +379,7 @@ export class AgentExecutor {
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       db.failAgentRun(run.id, errMsg);
+      await finishReporter("error", errMsg);
       logEvent("info", "agent-run-complete", {
         "agent-name": agent.name,
         "agent-run-id": run.id,
@@ -432,6 +471,7 @@ export function createAgentExecutor(options?: {
   db?: HiBossDatabase;
   hibossDir?: string;
   onEnvelopesDone?: (envelopeIds: string[], db: HiBossDatabase) => void | Promise<void>;
+  createRunStatusReporter?: AgentRunStatusReporterFactory;
 }): AgentExecutor {
   return new AgentExecutor(options);
 }
