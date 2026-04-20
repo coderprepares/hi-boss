@@ -2,13 +2,13 @@ import { getDefaultConfig, getSocketPath } from "../../daemon/daemon.js";
 import { IpcClient } from "../ipc-client.js";
 import type { Agent } from "../../agent/types.js";
 import type { AgentAbortResult, AgentStatusResult } from "../../daemon/ipc/types.js";
-import { formatShortId } from "../../shared/id-format.js";
 import { formatUnixMsAsTimeZoneOffset } from "../../shared/time.js";
 import { AGENT_NAME_ERROR_MESSAGE, isValidAgentName } from "../../shared/validation.js";
 import { resolveToken } from "../token.js";
 import { DEFAULT_AGENT_PERMISSION_LEVEL } from "../../shared/defaults.js";
 import { normalizeDefaultSentinel, readMetadataInput, sanitizeAgentMetadata } from "./agent-shared.js";
 import { getDaemonTimeContext } from "../time-context.js";
+import { renderAgentStatusText } from "../../shared/agent-status-output.js";
 export { bindAgent, unbindAgent } from "./agent-bindings.js";
 export type { BindAgentOptions, UnbindAgentOptions } from "./agent-bindings.js";
 export { setAgentSessionPolicy } from "./agent-session-policy.js";
@@ -296,60 +296,7 @@ export async function agentStatus(options: AgentStatusOptions): Promise<void> {
       token,
       agentName: options.name,
     });
-
-    console.log(`name: ${result.agent.name}`);
-    console.log(`role: ${result.agent.role ?? "(missing)"}`);
-    console.log(`workspace: ${result.effective.workspace}`);
-    console.log(`provider: ${result.effective.provider}`);
-    console.log(`model: ${result.agent.model ?? "default"}`);
-    console.log(`reasoning-effort: ${result.agent.reasoningEffort ?? "default"}`);
-    console.log(`permission-level: ${result.effective.permissionLevel}`);
-    console.log(`bindings: ${result.bindings.length > 0 ? result.bindings.join(", ") : "(none)"}`);
-    if (result.agent.sessionPolicy && typeof result.agent.sessionPolicy === "object") {
-      const sp = result.agent.sessionPolicy as Record<string, unknown>;
-      if (typeof sp.dailyResetAt === "string") {
-        console.log(`session-daily-reset-at: ${sp.dailyResetAt}`);
-      }
-      if (typeof sp.idleTimeout === "string") {
-        console.log(`session-idle-timeout: ${sp.idleTimeout}`);
-      }
-      if (typeof sp.maxContextLength === "number") {
-        console.log(`session-max-context-length: ${sp.maxContextLength}`);
-      }
-    }
-    console.log(`agent-state: ${result.status.agentState}`);
-    console.log(`agent-health: ${result.status.agentHealth}`);
-    console.log(`pending-count: ${result.status.pendingCount}`);
-
-    if (result.status.currentRun) {
-      console.log(`current-run-id: ${formatShortId(result.status.currentRun.id)}`);
-      console.log(
-        `current-run-started-at: ${formatUnixMsAsTimeZoneOffset(result.status.currentRun.startedAt, time.bossTimezone)}`
-      );
-    }
-
-    if (!result.status.lastRun) {
-      console.log("last-run-status: none");
-      return;
-    }
-
-    console.log(`last-run-id: ${formatShortId(result.status.lastRun.id)}`);
-    console.log(`last-run-status: ${result.status.lastRun.status}`);
-    console.log(`last-run-started-at: ${formatUnixMsAsTimeZoneOffset(result.status.lastRun.startedAt, time.bossTimezone)}`);
-    if (typeof result.status.lastRun.completedAt === "number") {
-      console.log(
-        `last-run-completed-at: ${formatUnixMsAsTimeZoneOffset(result.status.lastRun.completedAt, time.bossTimezone)}`
-      );
-    }
-    if (typeof result.status.lastRun.contextLength === "number") {
-      console.log(`last-run-context-length: ${result.status.lastRun.contextLength}`);
-    }
-    if (
-      (result.status.lastRun.status === "failed" || result.status.lastRun.status === "cancelled") &&
-      result.status.lastRun.error
-    ) {
-      console.log(`last-run-error: ${result.status.lastRun.error}`);
-    }
+    console.log(renderAgentStatusText(result, time.bossTimezone));
   } catch (err) {
     console.error("error:", (err as Error).message);
     process.exit(1);

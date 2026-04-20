@@ -233,9 +233,11 @@ Clearing nullable overrides:
   - `agent-name:`
 - `hiboss agent list` prints fields like `created-at:` (timestamps are shown in boss timezone offset).
 - `hiboss agent status` prints:
+  - `role:` (`speaker|leader`, or `(missing)` only for broken internal state)
   - `agent-state:` (`running|idle`)
   - `agent-health:` (`ok|error|unknown`)
   - `pending-count:` (counts due pending envelopes)
+  - `background-state:` / `background-running-count:` / `background-queued-count:` / `background-open-count:` (live in-memory background delegation snapshot)
   - `current-run-id:` / `current-run-started-at:` (optional)
   - `last-run-status:` (`completed|failed|cancelled|none`)
   - `last-run-*:` fields (optional; see `docs/spec/cli/agents.md`)

@@ -113,5 +113,5 @@ See `docs/spec/components/scheduler.md` for the exact wake-up algorithm.
 3. `ChannelBridge` enforces boss-only behavior and resolves which agent is bound to that bot token:
    - if unbound: returns a `not-configured:` + `fix:` message
    - if bound: enriches the command with `agentName`
-4. `Daemon` computes the status for the bound agent and returns the same key/value output as `hiboss agent status --name <agent-name>`.
+4. `Daemon` computes the status for the bound agent and returns the same key/value output as `hiboss agent status --name <agent-name>`, including live background delegation counts.
 5. `TelegramAdapter` replies with the returned status text.

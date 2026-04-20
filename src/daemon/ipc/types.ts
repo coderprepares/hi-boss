@@ -232,6 +232,12 @@ export interface AgentStatusResult {
     agentState: "running" | "idle";
     agentHealth: "ok" | "error" | "unknown";
     pendingCount: number;
+    background: {
+      state: "idle" | "active";
+      queuedCount: number;
+      runningCount: number;
+      openCount: number;
+    };
     currentRun?: {
       id: string;
       startedAt: number;

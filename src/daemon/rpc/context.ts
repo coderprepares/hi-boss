@@ -8,6 +8,7 @@
 import type { HiBossDatabase } from "../db/database.js";
 import type { MessageRouter } from "../router/message-router.js";
 import type { AgentExecutor } from "../../agent/executor.js";
+import type { BackgroundExecutor } from "../../agent/background-executor.js";
 import type { EnvelopeScheduler } from "../scheduler/envelope-scheduler.js";
 import type { CronScheduler } from "../scheduler/cron-scheduler.js";
 import type { ChatAdapter } from "../../adapters/types.js";
@@ -32,6 +33,7 @@ export interface DaemonContext {
   readonly db: HiBossDatabase;
   readonly router: MessageRouter;
   readonly executor: AgentExecutor;
+  readonly backgroundExecutor: BackgroundExecutor;
   readonly scheduler: EnvelopeScheduler;
   readonly cronScheduler: CronScheduler | null;
   readonly adapters: Map<string, ChatAdapter>;

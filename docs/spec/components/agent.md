@@ -219,6 +219,7 @@ Behavior (canonical):
   - `from: agent:background`
   - `to: agent:<sender>`
   - `metadata.replyToEnvelopeId: <background-request-envelope-uuid>`
+- **Live status visibility**: the daemon keeps an in-memory per-sender snapshot of queued/running background jobs for `hiboss agent status` and Telegram `/status` (`background-*` fields). This snapshot is not durable and is reset on daemon restart.
 - **Failure feedback text**: provider/spawn/runtime failures are returned as `Background job failed: <error>` in the feedback envelope body.
 - **No-feedback edge cases**: if `from` is not an agent address or the sender agent cannot be resolved, the daemon logs and drops the background request without sending feedback.
 - **No conversation**: background jobs are one-shot and have no memory. Treat the feedback envelope as a result; do not send an acknowledgement reply. For follow-up work, send a new envelope to `agent:background` with full context (and a `replyToEnvelopeId` link).

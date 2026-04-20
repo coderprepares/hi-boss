@@ -11,6 +11,20 @@ import {
 import { errorMessage, logEvent } from "../shared/daemon-log.js";
 import { executeBackgroundPrompt } from "./background-turn.js";
 
+export interface BackgroundSenderAgentSnapshot {
+  state: "idle" | "active";
+  queuedCount: number;
+  runningCount: number;
+  openCount: number;
+}
+
+export type BackgroundPromptRunner = typeof executeBackgroundPrompt;
+
+type BackgroundQueueItem = {
+  envelope: Envelope;
+  senderAgentKey: string | null;
+};
+
 function formatAttachmentsForPrompt(envelope: Envelope): string {
   const attachments = envelope.content.attachments ?? [];
   if (attachments.length === 0) return "(none)";
@@ -36,16 +50,58 @@ function buildBackgroundPrompt(envelope: Envelope): string {
 
 export class BackgroundExecutor {
   private readonly maxConcurrent: number;
-  private readonly queue: Envelope[] = [];
+  private readonly queue: BackgroundQueueItem[] = [];
+  private readonly senderCounts = new Map<string, { queuedCount: number; runningCount: number }>();
+  private readonly runPrompt: BackgroundPromptRunner;
   private inFlight = 0;
 
   constructor(
     private readonly deps: { db: HiBossDatabase; router: MessageRouter },
-    options: { maxConcurrent?: number } = {}
+    options: { maxConcurrent?: number; runPrompt?: BackgroundPromptRunner } = {}
   ) {
     const raw = options.maxConcurrent ?? DEFAULT_BACKGROUND_MAX_CONCURRENT;
     const n = Number.isFinite(raw) ? Math.trunc(raw) : DEFAULT_BACKGROUND_MAX_CONCURRENT;
     this.maxConcurrent = Math.max(1, Math.min(32, n));
+    this.runPrompt = options.runPrompt ?? executeBackgroundPrompt;
+  }
+
+  getSenderAgentSnapshot(agentName: string): BackgroundSenderAgentSnapshot {
+    const key = agentName.trim().toLowerCase();
+    const counts = this.senderCounts.get(key) ?? { queuedCount: 0, runningCount: 0 };
+    const openCount = counts.queuedCount + counts.runningCount;
+    return {
+      state: openCount > 0 ? "active" : "idle",
+      queuedCount: counts.queuedCount,
+      runningCount: counts.runningCount,
+      openCount,
+    };
+  }
+
+  private resolveSenderAgentKey(envelope: Envelope): string | null {
+    try {
+      const from = parseAddress(envelope.from);
+      if (from.type !== "agent") return null;
+      const normalized = from.agentName.trim().toLowerCase();
+      return normalized || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private updateSenderCounts(
+    senderAgentKey: string,
+    delta: { queuedCount?: number; runningCount?: number }
+  ): void {
+    const current = this.senderCounts.get(senderAgentKey) ?? { queuedCount: 0, runningCount: 0 };
+    const next = {
+      queuedCount: Math.max(0, current.queuedCount + (delta.queuedCount ?? 0)),
+      runningCount: Math.max(0, current.runningCount + (delta.runningCount ?? 0)),
+    };
+    if (next.queuedCount === 0 && next.runningCount === 0) {
+      this.senderCounts.delete(senderAgentKey);
+      return;
+    }
+    this.senderCounts.set(senderAgentKey, next);
   }
 
   /**
@@ -64,22 +120,33 @@ export class BackgroundExecutor {
       // Continue anyway; best-effort.
     }
 
-    this.queue.push(envelope);
+    const senderAgentKey = this.resolveSenderAgentKey(envelope);
+    if (senderAgentKey) {
+      this.updateSenderCounts(senderAgentKey, { queuedCount: 1 });
+    }
+
+    this.queue.push({ envelope, senderAgentKey });
     this.drain();
   }
 
   private drain(): void {
     while (this.inFlight < this.maxConcurrent && this.queue.length > 0) {
-      const env = this.queue.shift()!;
+      const item = this.queue.shift()!;
+      if (item.senderAgentKey) {
+        this.updateSenderCounts(item.senderAgentKey, { queuedCount: -1, runningCount: 1 });
+      }
       this.inFlight++;
-      void this.runOne(env)
+      void this.runOne(item.envelope)
         .catch((err) => {
           logEvent("error", "background-job-failed", {
-            "envelope-id": env.id,
+            "envelope-id": item.envelope.id,
             error: errorMessage(err),
           });
         })
         .finally(() => {
+          if (item.senderAgentKey) {
+            this.updateSenderCounts(item.senderAgentKey, { runningCount: -1 });
+          }
           this.inFlight--;
           this.drain();
         });
@@ -133,7 +200,7 @@ export class BackgroundExecutor {
 
     let finalText: string;
     try {
-      const result = await executeBackgroundPrompt({
+      const result = await this.runPrompt({
         provider,
         workspace,
         prompt,

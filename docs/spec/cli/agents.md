@@ -176,6 +176,7 @@ Notes:
 - `role:` is shown when available (`speaker` or `leader`).
 - `agent-health` is derived from the most recent finished run: `ok` (last run completed or cancelled), `error` (last run failed), `unknown` (no finished runs yet).
 - `pending-count` counts **due** pending envelopes (`status=pending` and `deliver_at` is missing or `<= now`).
+- `background-*` fields are a live daemon-memory snapshot of `agent:background` jobs delegated by this agent. They are not part of the durable `agent_runs` audit model and reset when the daemon restarts.
 
 Flags:
 - `--name <name>` (required)
@@ -189,6 +190,7 @@ hiboss agent status --name nex
 
 ```text
 name: nex
+role: speaker
 workspace: /path/to/workspace
 provider: codex
 model: default
@@ -201,6 +203,10 @@ session-max-context-length: 180000
 agent-state: idle
 agent-health: ok
 pending-count: 0
+background-state: active
+background-running-count: 1
+background-queued-count: 2
+background-open-count: 3
 last-run-id: 2b7b6f0b
 last-run-status: completed
 last-run-started-at: 2026-02-03T12:00:00-08:00
@@ -210,18 +216,23 @@ last-run-context-length: 4123
 
 Output (parseable):
 - `name:`
+- `role:` (`speaker|leader` when available; `(missing)` only for broken internal state)
 - `workspace:`
 - `provider:` (`(none)` when unset)
 - `model:` (`default` when unset)
 - `reasoning-effort:` (`default` when unset)
 - `permission-level:`
-- `bindings:` (optional; comma-separated adapter types)
+- `bindings:` (comma-separated adapter types, or `(none)`)
 - `session-daily-reset-at:` (optional)
 - `session-idle-timeout:` (optional)
 - `session-max-context-length:` (optional)
 - `agent-state:` (`running|idle`)
 - `agent-health:` (`ok|error|unknown`)
 - `pending-count: <n>`
+- `background-state:` (`idle|active`)
+- `background-running-count: <n>`
+- `background-queued-count: <n>`
+- `background-open-count: <n>` (`background-running-count + background-queued-count`)
 - `current-run-id:` (optional; short id; when `agent-state=running` and a run record exists)
 - `current-run-started-at:` (optional; boss timezone offset)
 - `last-run-id:` (optional; short id)

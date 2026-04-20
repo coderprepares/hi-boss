@@ -183,6 +183,7 @@ export class Daemon {
       db: this.db,
       router: this.router,
       executor: this.executor,
+      backgroundExecutor: this.backgroundExecutor,
       scheduler: this.scheduler,
       cronScheduler: this.cronScheduler,
       adapters: this.adapters,
@@ -315,7 +316,13 @@ export class Daemon {
    * Set up command handler for adapter commands.
    */
   private setupCommandHandler(): void {
-    this.bridge.setCommandHandler(createChannelCommandHandler({ db: this.db, executor: this.executor }));
+    this.bridge.setCommandHandler(
+      createChannelCommandHandler({
+        db: this.db,
+        executor: this.executor,
+        backgroundExecutor: this.backgroundExecutor,
+      })
+    );
   }
 
   /**

@@ -14,7 +14,6 @@ import type {
   AgentAbortResult,
   AgentSelfParams,
   AgentStatusParams,
-  AgentStatusResult,
   AgentSessionPolicySetParams,
 } from "../ipc/types.js";
 import { RPC_ERRORS } from "../ipc/types.js";
@@ -23,7 +22,6 @@ import { requireToken, rpcError } from "./context.js";
 import { isValidAgentName, AGENT_NAME_ERROR_MESSAGE } from "../../shared/validation.js";
 import { parseDailyResetAt, parseDurationToMs } from "../../shared/session-policy.js";
 import {
-  DEFAULT_AGENT_PERMISSION_LEVEL,
   DEFAULT_AGENT_PROVIDER,
   getDefaultRuntimeWorkspace,
 } from "../../shared/defaults.js";
@@ -33,6 +31,7 @@ import {
   predictRoleAfterBindingMutation,
   buildMutationInvariantViolationMessage,
 } from "../../shared/agent-role-mutation.js";
+import { buildAgentStatusResult } from "../agent-status.js";
 
 /**
  * Create agent RPC handlers (excluding agent.set which is in its own file).
@@ -107,71 +106,12 @@ export function createAgentHandlers(ctx: DaemonContext): RpcMethodRegistry {
         rpcError(RPC_ERRORS.NOT_FOUND, "Agent not found");
       }
 
-      const effectiveProvider = agent.provider ?? DEFAULT_AGENT_PROVIDER;
-      const effectivePermissionLevel = agent.permissionLevel ?? DEFAULT_AGENT_PERMISSION_LEVEL;
-      const effectiveWorkspace = agent.workspace ?? getDefaultRuntimeWorkspace();
-
-      const isBusy = ctx.executor.isAgentBusy(agent.name);
-      const pendingCount = ctx.db.countDuePendingEnvelopesForAgent(agent.name);
-      const bindings = ctx.db.getBindingsByAgentName(agent.name).map((b) => b.adapterType);
-      const resolvedRole = requireRole(agent.name, agent.metadata);
-
-      const currentRun = isBusy ? ctx.db.getCurrentRunningAgentRun(agent.name) : null;
-      const lastRun = ctx.db.getLastFinishedAgentRun(agent.name);
-
-      const result: AgentStatusResult = {
-        agent: {
-          name: agent.name,
-          role: resolvedRole,
-          ...(agent.description ? { description: agent.description } : {}),
-          ...(agent.workspace ? { workspace: agent.workspace } : {}),
-          ...(agent.provider ? { provider: agent.provider } : {}),
-          ...(agent.model ? { model: agent.model } : {}),
-          ...(agent.reasoningEffort ? { reasoningEffort: agent.reasoningEffort } : {}),
-          ...(agent.permissionLevel ? { permissionLevel: agent.permissionLevel } : {}),
-          ...(agent.sessionPolicy ? { sessionPolicy: agent.sessionPolicy } : {}),
-        },
-        bindings,
-        effective: {
-          workspace: effectiveWorkspace,
-          provider: effectiveProvider,
-          permissionLevel: effectivePermissionLevel,
-        },
-        status: {
-          agentState: isBusy ? "running" : "idle",
-          agentHealth: !lastRun ? "unknown" : lastRun.status === "failed" ? "error" : "ok",
-          pendingCount,
-          ...(currentRun
-            ? {
-              currentRun: {
-                id: currentRun.id,
-                startedAt: currentRun.startedAt,
-              },
-            }
-            : {}),
-          ...(lastRun
-            ? {
-              lastRun: {
-                id: lastRun.id,
-                startedAt: lastRun.startedAt,
-                ...(typeof lastRun.completedAt === "number" ? { completedAt: lastRun.completedAt } : {}),
-                status:
-                  lastRun.status === "failed"
-                    ? "failed"
-                    : lastRun.status === "cancelled"
-                      ? "cancelled"
-                      : "completed",
-                ...(lastRun.error ? { error: lastRun.error } : {}),
-                ...(typeof lastRun.contextLength === "number"
-                  ? { contextLength: lastRun.contextLength }
-                  : {}),
-              },
-            }
-            : {}),
-        },
-      };
-
-      return result;
+      return buildAgentStatusResult({
+        db: ctx.db,
+        executor: ctx.executor,
+        backgroundExecutor: ctx.backgroundExecutor,
+        agent,
+      });
     },
 
     "agent.abort": async (params) => {
