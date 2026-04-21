@@ -23,6 +23,12 @@ import {
 import { getDaemonIanaTimeZone, isValidIanaTimeZone } from "../../../shared/timezone.js";
 import { getSpeakerBindingIntegrity } from "../../../shared/speaker-binding-invariant.js";
 import { isPermissionLevel } from "../../../shared/permissions.js";
+import {
+  parseStoredHttpIngressConfig,
+  serializeHttpIngressConfig,
+  validateHttpIngressConfig,
+} from "../../../http-bridge/config.js";
+import { HTTP_INGRESS_CONFIG_KEY } from "../../../http-bridge/types.js";
 
 function ensureBossProfileFile(hibossDir: string): void {
   try {
@@ -55,6 +61,7 @@ function buildDefaultDeclarativeConfig(): SetupDeclarativeConfig {
     bossName: getDefaultSetupBossName(),
     bossTimezone: getDaemonIanaTimeZone(),
     telegramBossId: "",
+    httpIngress: undefined,
     agents: [
       {
         name: DEFAULT_SETUP_AGENT_NAME,
@@ -152,6 +159,7 @@ export async function exportSetupConfig(): Promise<SetupDeclarativeConfig> {
       bossName: (db.getBossName() ?? "").trim() || getDefaultSetupBossName(),
       bossTimezone: (db.getConfig("boss_timezone") ?? "").trim() || getDaemonIanaTimeZone(),
       telegramBossId: (db.getAdapterBossId("telegram") ?? "").trim(),
+      httpIngress: parseStoredHttpIngressConfig(db.getConfig(HTTP_INGRESS_CONFIG_KEY)),
       agents,
     };
   } finally {
@@ -178,6 +186,12 @@ function assertDeclarativeConfig(config: SetupDeclarativeConfig): void {
 
   if (!Array.isArray(config.agents) || config.agents.length === 0) {
     throw new Error("Invalid setup config (agents must contain at least one agent)");
+  }
+
+  if (config.httpIngress !== undefined) {
+    validateHttpIngressConfig(config.httpIngress, {
+      agentNames: config.agents.map((agent) => agent.name),
+    });
   }
 
   const normalizedRoles = new Set<string>();
@@ -351,6 +365,14 @@ export async function reconcileSetupConfig(params: {
       db.setBossName(params.config.bossName.trim());
       db.setConfig("boss_timezone", params.config.bossTimezone.trim());
       db.setAdapterBossId("telegram", params.config.telegramBossId.trim().replace(/^@/, ""));
+      if (params.config.httpIngress) {
+        db.setConfig(
+          HTTP_INGRESS_CONFIG_KEY,
+          serializeHttpIngressConfig(params.config.httpIngress),
+        );
+      } else {
+        db.deleteConfig(HTTP_INGRESS_CONFIG_KEY);
+      }
       db.setBossToken(token);
 
       const tokens: Array<{ name: string; role: AgentRole; token: string }> = [];

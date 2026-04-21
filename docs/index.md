@@ -23,6 +23,7 @@ Core (top-level):
 
 Components:
 - `docs/spec/components/routing.md` — message routing and envelope flow
+- `docs/spec/components/http-ingress.md` — local HTTP ingress bridge to envelopes
 - `docs/spec/components/scheduler.md` — `deliver-at` scheduling details
 - `docs/spec/components/cron.md` — persistent cron schedules (materialized envelopes)
 - `docs/spec/components/agent.md` — agent model, execution, bindings, providers

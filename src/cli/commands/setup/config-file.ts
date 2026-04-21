@@ -19,6 +19,8 @@ import type {
 } from "./types.js";
 import { reconcileSetupConfig } from "./declarative.js";
 import { isPlainObject } from "./utils.js";
+import { normalizeHttpIngressConfig } from "../../../http-bridge/config.js";
+import type { HttpIngressConfig } from "../../../http-bridge/types.js";
 
 interface SetupConfigFileV2 {
   version: 2;
@@ -26,6 +28,28 @@ interface SetupConfigFileV2 {
   "boss-timezone"?: string;
   telegram: {
     "adapter-boss-id": string;
+  };
+  "http-ingress"?: {
+    host?: string;
+    port?: number;
+    bridges?: Array<{
+      name?: string;
+      path?: string;
+      auth?: {
+        header?: string;
+        secret?: string;
+      };
+      target?: {
+        to?: string;
+        "sender-agent"?: string;
+        "parse-mode"?: "plain" | "markdownv2" | "html";
+      };
+      formatter?: {
+        text?: string;
+        metadata?: Record<string, unknown>;
+        "include-raw-body"?: boolean;
+      };
+    }>;
   };
   agents: Array<{
     name: string;
@@ -151,6 +175,59 @@ function parseBindings(raw: unknown, agentName: string): SetupDeclarativeAgentCo
   });
 }
 
+function parseHttpIngress(raw: unknown): HttpIngressConfig | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (!isPlainObject(raw)) {
+    throw new Error("Invalid setup config (http-ingress must be an object)");
+  }
+
+  const bridgesRaw = raw.bridges;
+  const normalized = normalizeHttpIngressConfig({
+    host: raw.host,
+    port: raw.port,
+    bridges: Array.isArray(bridgesRaw)
+      ? bridgesRaw.map((bridge, index) => {
+          if (!isPlainObject(bridge)) {
+            throw new Error(
+              `Invalid setup config (http-ingress.bridges[${index}] must be an object)`,
+            );
+          }
+          const auth = bridge.auth;
+          const target = bridge.target;
+          const formatter = bridge.formatter;
+          return {
+            name: bridge.name,
+            path: bridge.path,
+            auth: isPlainObject(auth)
+              ? {
+                  header: auth.header,
+                  secret: auth.secret,
+                }
+              : auth,
+            target: isPlainObject(target)
+              ? {
+                  to: target.to,
+                  senderAgent: target["sender-agent"],
+                  parseMode: target["parse-mode"],
+                }
+              : target,
+            formatter: isPlainObject(formatter)
+              ? {
+                  text: formatter.text,
+                  metadata: formatter.metadata,
+                  includeRawBody: formatter["include-raw-body"],
+                }
+              : formatter,
+          };
+        })
+      : bridgesRaw,
+  });
+
+  return normalized.bridges.length > 0 ? normalized : undefined;
+}
+
 function parseSetupConfigFileV2(json: string): SetupDeclarativeConfig {
   let parsed: unknown;
   try {
@@ -270,6 +347,7 @@ function parseSetupConfigFileV2(json: string): SetupDeclarativeConfig {
     bossName,
     bossTimezone,
     telegramBossId,
+    httpIngress: parseHttpIngress(parsed["http-ingress"]),
     agents,
   };
 }

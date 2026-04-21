@@ -16,6 +16,40 @@ function toConfigFileV2(config: Awaited<ReturnType<typeof exportSetupConfig>>): 
     telegram: {
       "adapter-boss-id": config.telegramBossId,
     },
+    ...(config.httpIngress
+      ? {
+          "http-ingress": {
+            host: config.httpIngress.host,
+            port: config.httpIngress.port,
+            bridges: config.httpIngress.bridges.map((bridge) => ({
+              name: bridge.name,
+              path: bridge.path,
+              auth: {
+                header: bridge.auth.header,
+                secret: bridge.auth.secret,
+              },
+              target: {
+                to: bridge.target.to,
+                ...(bridge.target.senderAgent
+                  ? { "sender-agent": bridge.target.senderAgent }
+                  : {}),
+                ...(bridge.target.parseMode
+                  ? { "parse-mode": bridge.target.parseMode }
+                  : {}),
+              },
+              formatter: {
+                text: bridge.formatter.text,
+                ...(bridge.formatter.metadata
+                  ? { metadata: bridge.formatter.metadata }
+                  : {}),
+                ...(bridge.formatter.includeRawBody
+                  ? { "include-raw-body": true }
+                  : {}),
+              },
+            })),
+          },
+        }
+      : {}),
     agents: config.agents.map((agent) => ({
       name: agent.name,
       role: agent.role,

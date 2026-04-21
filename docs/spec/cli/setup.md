@@ -92,6 +92,7 @@ Required:
 Optional (defaults applied if omitted):
 - `boss-name` (default: OS username)
 - `boss-timezone` (default: daemon host timezone; IANA)
+- `http-ingress` (default: disabled)
 
 Forbidden:
 - `boss-token`
@@ -121,11 +122,38 @@ Optional (defaults applied if omitted):
 - `adapter-type`
 - `adapter-token`
 
+`http-ingress` fields:
+
+Optional (defaults applied if object is present):
+- `host` (default: `127.0.0.1`)
+- `port` (default: `8787`)
+- `bridges[]`
+
+`http-ingress.bridges[]` fields:
+
+Required:
+- `name`
+- `path`
+- `auth.header`
+- `auth.secret`
+- `target.to`
+- `formatter.text`
+
+Optional:
+- `target.sender-agent` (required only when `target.to` is a channel address)
+- `target.parse-mode` (`plain|markdownv2|html`; channel destinations only)
+- `formatter.metadata` (object; rendered recursively)
+- `formatter.include-raw-body` (`true|false`; default `false`)
+
 Invariants:
 - At least one `speaker` and one `leader`.
 - Every `speaker` has at least one binding.
 - Adapter token identity (`adapter-type` + `adapter-token`) must be unique across agents.
 - For current adapter support, telegram token format must be valid when `adapter-type=telegram`.
+- `http-ingress.bridges[].name` and `path` must be unique.
+- `http-ingress.bridges[].path` must start with `/`.
+- `http-ingress.bridges[].target.sender-agent` is required for channel destinations and must reference a configured agent.
+- Agent destinations in `http-ingress` must reference a configured agent (or the reserved internal `background` agent).
 
 ### Example (Version 2)
 
@@ -136,6 +164,33 @@ Invariants:
   "boss-timezone": "Asia/Shanghai",
   "telegram": {
     "adapter-boss-id": "your_telegram_username"
+  },
+  "http-ingress": {
+    "host": "127.0.0.1",
+    "port": 8787,
+    "bridges": [
+      {
+        "name": "provider-alerts",
+        "path": "/bridges/provider-alerts",
+        "auth": {
+          "header": "X-Bridge-Secret",
+          "secret": "replace-me"
+        },
+        "target": {
+          "to": "channel:telegram:-1001234567890",
+          "sender-agent": "nex",
+          "parse-mode": "html"
+        },
+        "formatter": {
+          "text": "[{json.event}] provider={json.provider.name} state={json.circuit.state}",
+          "metadata": {
+            "event": "{json.event}",
+            "provider": "{json.provider.name}"
+          },
+          "include-raw-body": true
+        }
+      }
+    ]
   },
   "agents": [
     {
@@ -204,6 +259,7 @@ Core mappings:
 - `boss-name` → `config.boss_name`
 - `boss-timezone` → `config.boss_timezone`
 - `telegram.adapter-boss-id` → `config.adapter_boss_id_telegram` (stored without `@`)
+- `http-ingress` → `config.http_ingress` (JSON blob)
 - `agents[]` → `agents` rows
 - `agents[].bindings[]` → `agent_bindings` rows
 

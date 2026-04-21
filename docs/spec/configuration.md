@@ -9,6 +9,7 @@ Hi-Boss configuration comes from:
 1. CLI flags (`hiboss ... --flag`)
 2. Environment variables (`HIBOSS_TOKEN`, `HIBOSS_DIR`, …)
 3. SQLite state (`{{HIBOSS_DIR}}/.daemon/hiboss.db`)
+4. Declarative setup config files consumed by `hiboss setup --config-file ...`
 
 ## Defaults
 
@@ -29,6 +30,8 @@ Built-in defaults are centralized in:
 - Envelopes: `docs/spec/cli/envelopes.md`
 - Cron: `docs/spec/cli/cron.md`
 - Reactions: `docs/spec/cli/reactions.md`
+
+Declarative setup config currently also carries local HTTP ingress bridge settings (`http-ingress`), including listener host/port, per-path auth secrets, bridge targets, and formatter templates.
 
 ---
 

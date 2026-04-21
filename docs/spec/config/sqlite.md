@@ -22,6 +22,7 @@ Tables (high level):
 - `boss_token_hash`: hashed boss token (printed once by setup)
 - `permission_policy`: JSON mapping operations → required permission level
 - `adapter_boss_id_<adapter-type>`: boss identity on an adapter (e.g., `adapter_boss_id_telegram`)
+- `http_ingress`: JSON object for the local HTTP ingress bridge (listener host/port + bridge definitions)
 
 ## Key invariants
 

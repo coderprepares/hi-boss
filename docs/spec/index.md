@@ -13,6 +13,7 @@
 
 - Envelopes (what they are; how they complete): `docs/spec/envelope.md`
 - Routing: `docs/spec/components/routing.md`
+- HTTP ingress bridge: `docs/spec/components/http-ingress.md`
 - Scheduler (`--deliver-at`): `docs/spec/components/scheduler.md`
 - Cron schedules (materialized envelopes): `docs/spec/components/cron.md`
 

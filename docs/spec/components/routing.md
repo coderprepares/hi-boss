@@ -6,6 +6,7 @@ Key implementation files:
 
 - `src/daemon/daemon.ts` — wires everything together (IPC, DB, adapters, scheduler, agent execution)
 - `src/daemon/bridges/channel-bridge.ts` — converts adapter messages → envelopes
+- `src/http-bridge/http-ingress-bridge.ts` — converts local HTTP POSTs → envelopes
 - `src/daemon/router/message-router.ts` — creates and delivers envelopes
 - `src/daemon/scheduler/envelope-scheduler.ts` — wakes scheduled envelopes and triggers agent runs
 - `src/agent/executor.ts` — runs agents and acknowledges envelopes (marks `done` on read)
@@ -23,6 +24,7 @@ The daemon owns:
 - **Adapters**: e.g. Telegram bots
 - **Routing**: `MessageRouter`
 - **Channel bridge**: `ChannelBridge`
+- **HTTP ingress bridge**: `HttpIngressBridge`
 - **Scheduling**: `EnvelopeScheduler`
 - **Agent runtime**: `AgentExecutor`
 
@@ -59,6 +61,16 @@ If no binding exists:
 
 - The message is dropped.
 - If `from-boss: true`, the adapter receives a “not-configured” message telling you how to bind an agent.
+
+### HTTP ingress → Agent or Channel
+
+1. A local producer sends `POST` JSON to a configured HTTP ingress path.
+2. `HttpIngressBridge` validates the auth header and parses the JSON body.
+3. The configured formatter renders envelope text and optional metadata.
+4. The bridge creates a normal envelope:
+   - to an agent via `from = channel:http:<bridge-name>`, or
+   - to a channel via `from = agent:<sender-agent>`
+5. `MessageRouter.routeEnvelope()` persists and immediately delivers due envelopes using the same routing rules as any other source.
 
 ---
 

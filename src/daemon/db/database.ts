@@ -1488,6 +1488,14 @@ export class HiBossDatabase {
   }
 
   /**
+   * Delete a config value.
+   */
+  deleteConfig(key: string): void {
+    const stmt = this.db.prepare("DELETE FROM config WHERE key = ?");
+    stmt.run(key);
+  }
+
+  /**
    * Check if setup is complete.
    */
   isSetupComplete(): boolean {

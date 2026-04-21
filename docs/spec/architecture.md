@@ -10,6 +10,10 @@ This document is a high-level view of Hi-Boss. For details, see the linked spec 
 │ (Telegram…)  │     │ (Telegram…)   │     │  (router + scheduler │
 └──────────────┘     └───────────────┘     │   + agent executor)  │
                                            └──────────┬───────────┘
+┌──────────────┐     ┌───────────────┐                │
+│ HTTP Events  │────▶│ HTTP Ingress  │────────────────┘
+│ (webhooks)   │     │   Bridge      │
+└──────────────┘     └───────────────┘
                                                       │
                                            persists   │   JSON-RPC
                                                       │   (local socket)
@@ -31,6 +35,7 @@ This document is a high-level view of Hi-Boss. For details, see the linked spec 
 | Agent executor | Runs provider CLI sessions and marks envelopes done | `docs/spec/components/agent.md`, `docs/spec/components/session.md` |
 | CLI | Talks to daemon over IPC for ops + envelopes | `docs/spec/ipc.md` |
 | Adapters | Bridge external systems to channel messages/commands | `docs/spec/adapters/telegram.md` |
+| HTTP ingress bridge | Accepts local HTTP POSTs and materializes envelopes via declarative formatters | `docs/spec/components/http-ingress.md` |
 
 ## Key Invariants
 

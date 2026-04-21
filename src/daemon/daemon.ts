@@ -1,7 +1,3 @@
-/**
- * Hi-Boss daemon - manages agents, messages, and platform integrations.
- */
-
 import * as path from "path";
 import { HiBossDatabase } from "./db/database.js";
 import { IpcServer } from "./ipc/server.js";
@@ -50,34 +46,21 @@ import {
   hasSpeakerBindingIntegrityViolations,
   toSpeakerBindingIntegrityView,
 } from "../shared/speaker-binding-invariant.js";
+import { parseStoredHttpIngressConfig } from "../http-bridge/config.js";
+import { HttpIngressBridge } from "../http-bridge/http-ingress-bridge.js";
+import { HTTP_INGRESS_CONFIG_KEY } from "../http-bridge/types.js";
 
 // Re-export for CLI and external use
 export { isDaemonRunning, isSocketAcceptingConnections };
 
-/**
- * Hi-Boss daemon configuration.
- */
 export interface DaemonConfig {
-  /**
-   * Hi-Boss root directory (user-facing).
-   *
-   * Default: `~/hiboss` (override via `HIBOSS_DIR`).
-   */
   dataDir: string;
-  /**
-   * Internal daemon directory (hidden).
-   *
-   * Default: `{{dataDir}}/.daemon`.
-   */
   daemonDir: string;
   boss?: {
     telegram?: string;
   };
 }
 
-/**
- * Default configuration paths.
- */
 export function getDefaultConfig(): DaemonConfig {
   const paths = getHiBossPaths();
   return {
@@ -86,16 +69,10 @@ export function getDefaultConfig(): DaemonConfig {
   };
 }
 
-/**
- * Get socket path for IPC client.
- */
 export function getSocketPath(config: DaemonConfig = getDefaultConfig()): string {
   return path.join(config.daemonDir, "daemon.sock");
 }
 
-/**
- * Hi-Boss daemon - manages agents, messages, and platform integrations.
- */
 export class Daemon {
   private db: HiBossDatabase;
   private ipc: IpcServer;
@@ -105,6 +82,7 @@ export class Daemon {
   private backgroundExecutor: BackgroundExecutor;
   private scheduler: EnvelopeScheduler;
   private cronScheduler: CronScheduler | null = null;
+  private httpIngress: HttpIngressBridge | null = null;
   private adapters: Map<string, ChatAdapter> = new Map(); // token -> adapter
   private createRunStatusReporter = ({ agent, envelopes }: { agent: Agent; envelopes: Envelope[] }) =>
     createTelegramRunStatusReporter({
@@ -173,9 +151,6 @@ export class Daemon {
     }
   }
 
-  /**
-   * Create the DaemonContext for RPC handlers.
-   */
   private createContext(): DaemonContext {
     // Important: `running`/`startTimeMs` must reflect live daemon state (daemon.status depends on it).
     const daemon = this;
@@ -203,9 +178,6 @@ export class Daemon {
     };
   }
 
-  /**
-   * Start the daemon.
-   */
   async start(): Promise<void> {
     if (this.running) {
       throw new Error("Daemon is already running");
@@ -290,6 +262,9 @@ export class Daemon {
         await adapter.start();
       }
 
+      this.httpIngress = this.createHttpIngressBridge();
+      await this.httpIngress?.start();
+
       // Cron: skip missed runs before any startup delivery/turn triggers.
       this.cronScheduler?.reconcileAllSchedules({ skipMisfires: true });
 
@@ -312,9 +287,6 @@ export class Daemon {
     });
   }
 
-  /**
-   * Set up command handler for adapter commands.
-   */
   private setupCommandHandler(): void {
     this.bridge.setCommandHandler(
       createChannelCommandHandler({
@@ -325,9 +297,6 @@ export class Daemon {
     );
   }
 
-  /**
-   * Register handlers for all agents to trigger execution on new envelopes.
-   */
   private async registerAgentExecutionHandlers(): Promise<void> {
     const agents = this.db.listAgents();
 
@@ -336,9 +305,6 @@ export class Daemon {
     }
   }
 
-  /**
-   * Register a single agent handler for auto-execution.
-   */
   private registerSingleAgentHandler(agentName: string): void {
     this.router.registerAgentHandler(agentName, async (envelope) => {
       const currentAgent = this.db.getAgentByName(agentName);
@@ -367,9 +333,6 @@ export class Daemon {
     });
   }
 
-  /**
-   * Process any pending envelopes that existed before daemon restart.
-   */
   private async processPendingEnvelopes(): Promise<void> {
     const agents = this.db.listAgents();
 
@@ -386,9 +349,6 @@ export class Daemon {
     }
   }
 
-  /**
-   * Load bindings from database and create adapters.
-   */
   private async loadBindings(): Promise<void> {
     const bindings = this.db.listBindings();
 
@@ -397,9 +357,6 @@ export class Daemon {
     }
   }
 
-  /**
-   * Create an adapter for a binding.
-   */
   private async createAdapterForBinding(
     adapterType: string,
     adapterToken: string
@@ -430,9 +387,6 @@ export class Daemon {
     return adapter;
   }
 
-  /**
-   * Remove an adapter.
-   */
   private async removeAdapter(adapterToken: string): Promise<void> {
     const adapter = this.adapters.get(adapterToken);
     if (adapter) {
@@ -441,14 +395,14 @@ export class Daemon {
     }
   }
 
-  /**
-   * Stop the daemon.
-   */
   async stop(): Promise<void> {
     if (!this.running) return;
 
     // Stop scheduler first (prevents new work while shutting down)
     this.scheduler.stop();
+
+    await this.httpIngress?.stop();
+    this.httpIngress = null;
 
     // Stop all adapters
     for (const adapter of this.adapters.values()) {
@@ -471,16 +425,10 @@ export class Daemon {
     logEvent("info", "daemon-stopped");
   }
 
-  /**
-   * Check if daemon is running.
-   */
   isRunning(): boolean {
     return this.running;
   }
 
-  /**
-   * Register all RPC methods using extracted handlers.
-   */
   private registerRpcMethods(): void {
     const ctx = this.createContext();
 
@@ -496,5 +444,14 @@ export class Daemon {
     };
 
     this.ipc.registerMethods(methods);
+  }
+
+  private createHttpIngressBridge(): HttpIngressBridge | null {
+    const raw = this.db.getConfig(HTTP_INGRESS_CONFIG_KEY);
+    const config = parseStoredHttpIngressConfig(raw);
+    if (!config || config.bridges.length === 0) {
+      return null;
+    }
+    return new HttpIngressBridge(this.db, this.router, config);
   }
 }

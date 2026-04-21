@@ -1,4 +1,5 @@
 import type { AgentRole } from "../../../shared/agent-role.js";
+import type { HttpIngressConfig } from "../../../http-bridge/types.js";
 
 export type SetupProvider = "claude" | "codex";
 export type SetupReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh";
@@ -53,6 +54,7 @@ export interface SetupDeclarativeConfig {
   bossName: string;
   bossTimezone: string;
   telegramBossId: string;
+  httpIngress?: HttpIngressConfig;
   agents: SetupDeclarativeAgentConfig[];
 }
 
