@@ -164,6 +164,31 @@ Default permission:
 
 ---
 
+## `hiboss agent refresh`
+
+Requests a fresh provider session for a single agent. Existing/resumed provider session state is cleared; the next run starts from a new session.
+
+Notes:
+- Requires a boss token by default (`agent.refresh`).
+- The refresh is queued behind any current run for that agent and is applied at the next safe point.
+- This is the CLI equivalent of Telegram `/new` for the bound agent, and Telegram `/new <agent-name>` for a named agent.
+
+Flags:
+- `--name <name>` (required)
+- `--token <token>` (optional; defaults to `HIBOSS_TOKEN`)
+
+Example:
+
+```bash
+hiboss agent refresh --name kai
+```
+
+Output (parseable):
+- `success: true|false`
+- `agent-name:`
+
+---
+
 ## `hiboss agent status`
 
 Shows runtime status for a single agent (intended for operator UX and dashboards).

@@ -1,5 +1,13 @@
 import type { Command } from "commander";
-import { registerAgent, setAgent, listAgents, deleteAgent, agentStatus, abortAgent } from "./commands/index.js";
+import {
+  registerAgent,
+  setAgent,
+  listAgents,
+  deleteAgent,
+  agentStatus,
+  refreshAgent,
+  abortAgent,
+} from "./commands/index.js";
 
 export function registerAgentCommands(program: Command): void {
   // Agent commands
@@ -167,6 +175,15 @@ export function registerAgentCommands(program: Command): void {
     .option("--token <token>", "Token (defaults to HIBOSS_TOKEN)")
     .action((options) => {
       agentStatus({ token: options.token, name: options.name });
+    });
+
+  agent
+    .command("refresh")
+    .description("Request a fresh provider session for an agent")
+    .requiredOption("--name <name>", "Agent name")
+    .option("--token <token>", "Token (defaults to HIBOSS_TOKEN)")
+    .action((options) => {
+      refreshAgent({ token: options.token, name: options.name });
     });
 
   agent

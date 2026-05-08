@@ -231,6 +231,9 @@ Clearing nullable overrides:
 - `hiboss agent delete` prints:
   - `success: true|false`
   - `agent-name:`
+- `hiboss agent refresh` prints:
+  - `success: true|false`
+  - `agent-name:`
 - `hiboss agent list` prints fields like `created-at:` (timestamps are shown in boss timezone offset).
 - `hiboss agent status` prints:
   - `role:` (`speaker|leader`, or `(missing)` only for broken internal state)

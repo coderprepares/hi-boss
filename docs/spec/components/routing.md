@@ -107,23 +107,27 @@ See `docs/spec/components/scheduler.md` for the exact wake-up algorithm.
 
 ## `/new` Session Refresh (Telegram)
 
-1. Boss sends `/new` to the Telegram bot.
+1. Boss sends `/new` or `/new <agent-name>` to the Telegram bot.
 2. `TelegramAdapter` emits a `ChannelCommand { command: "new", ... }`.
 3. `ChannelBridge` enforces boss-only behavior and resolves which agent is bound to that bot token:
    - if unbound: returns a `not-configured:` + `fix:` message
    - if bound: enriches the command with `agentName`
-4. `Daemon` receives the bound command, calls `AgentExecutor.requestSessionRefresh(agentName, "telegram:/new")`, and returns `Session refresh requested.`
-5. `TelegramAdapter` replies with the returned message.
-6. The refresh is applied at the next safe point (before the next run, or after the current queue drains).
+4. `Daemon` receives the bound command and resolves the target:
+   - without args: the bound agent
+   - with one arg: the named agent
+5. `Daemon` calls `AgentExecutor.requestSessionRefresh(targetAgentName, "telegram:/new")` and returns `Session refresh requested.`
+   - when the named target differs from the bound agent, the reply also includes `agent-name: <name>`
+6. `TelegramAdapter` replies with the returned message.
+7. The refresh is applied at the next safe point (before the next run, or after the current queue drains).
 
 ---
 
 ## `/status` (Telegram)
 
-1. Boss sends `/status` to the Telegram bot.
+1. Boss sends `/status` or `/status <agent-name>` to the Telegram bot.
 2. `TelegramAdapter` emits a `ChannelCommand { command: "status", ... }`.
 3. `ChannelBridge` enforces boss-only behavior and resolves which agent is bound to that bot token:
    - if unbound: returns a `not-configured:` + `fix:` message
    - if bound: enriches the command with `agentName`
-4. `Daemon` computes the status for the bound agent and returns the same key/value output as `hiboss agent status --name <agent-name>`, including live background delegation counts.
+4. `Daemon` computes the status for the bound agent by default, or for the named agent when one arg is provided, and returns the same key/value output as `hiboss agent status --name <agent-name>`, including live background delegation counts.
 5. `TelegramAdapter` replies with the returned status text.

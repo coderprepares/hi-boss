@@ -41,6 +41,11 @@ interface AgentDeleteResult {
   agentName: string;
 }
 
+interface AgentRefreshResult {
+  success: boolean;
+  agentName: string;
+}
+
 export interface RegisterAgentOptions {
   token?: string;
   name: string;
@@ -67,6 +72,11 @@ export interface DeleteAgentOptions {
 }
 
 export interface AgentStatusOptions {
+  token?: string;
+  name: string;
+}
+
+export interface AgentRefreshOptions {
   token?: string;
   name: string;
 }
@@ -297,6 +307,32 @@ export async function agentStatus(options: AgentStatusOptions): Promise<void> {
       agentName: options.name,
     });
     console.log(renderAgentStatusText(result, time.bossTimezone));
+  } catch (err) {
+    console.error("error:", (err as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Request a fresh provider session for a single agent.
+ */
+export async function refreshAgent(options: AgentRefreshOptions): Promise<void> {
+  if (!isValidAgentName(options.name)) {
+    console.error("error:", AGENT_NAME_ERROR_MESSAGE);
+    process.exit(1);
+  }
+
+  const config = getDefaultConfig();
+  const client = new IpcClient(getSocketPath(config));
+
+  try {
+    const result = await client.call<AgentRefreshResult>("agent.refresh", {
+      token: resolveToken(options.token),
+      agentName: options.name,
+    });
+
+    console.log(`success: ${result.success ? "true" : "false"}`);
+    console.log(`agent-name: ${result.agentName}`);
   } catch (err) {
     console.error("error:", (err as Error).message);
     process.exit(1);

@@ -5,8 +5,31 @@ import type { AgentExecutor } from "../agent/executor.js";
 import { getTelegramVerboseEnabled, setTelegramVerboseEnabled } from "./telegram-status-config.js";
 import { buildAgentStatusResult } from "./agent-status.js";
 import { renderAgentStatusText } from "../shared/agent-status-output.js";
+import { AGENT_NAME_ERROR_MESSAGE, isValidAgentName } from "../shared/validation.js";
 
 type EnrichedChannelCommand = ChannelCommand & { agentName?: string };
+
+function resolveTargetAgentName(command: EnrichedChannelCommand): { agentName: string } | { error: string } {
+  if (typeof command.agentName !== "string" || !command.agentName) {
+    return { error: "error: Agent not found" };
+  }
+
+  const args = command.args.trim();
+  if (!args) {
+    return { agentName: command.agentName };
+  }
+
+  const parts = args.split(/\s+/);
+  if (parts.length !== 1) {
+    return { error: `error: usage /${command.command} [agent-name]` };
+  }
+
+  if (!isValidAgentName(parts[0])) {
+    return { error: `error: ${AGENT_NAME_ERROR_MESSAGE}` };
+  }
+
+  return { agentName: parts[0] };
+}
 
 function buildAgentStatusText(params: {
   db: HiBossDatabase;
@@ -38,17 +61,35 @@ export function createChannelCommandHandler(params: {
     if (typeof c.command !== "string") return;
 
     if (c.command === "new" && typeof c.agentName === "string" && c.agentName) {
-      params.executor.requestSessionRefresh(c.agentName, "telegram:/new");
-      return { text: "Session refresh requested." };
+      const target = resolveTargetAgentName(c);
+      if ("error" in target) {
+        return { text: target.error };
+      }
+
+      const agent = params.db.getAgentByNameCaseInsensitive(target.agentName);
+      if (!agent) {
+        return { text: "error: Agent not found" };
+      }
+
+      params.executor.requestSessionRefresh(agent.name, "telegram:/new");
+      if (agent.name === c.agentName) {
+        return { text: "Session refresh requested." };
+      }
+      return { text: `Session refresh requested.\nagent-name: ${agent.name}` };
     }
 
     if (c.command === "status" && typeof c.agentName === "string" && c.agentName) {
+      const target = resolveTargetAgentName(c);
+      if ("error" in target) {
+        return { text: target.error };
+      }
+
       return {
         text: buildAgentStatusText({
           db: params.db,
           executor: params.executor,
           backgroundExecutor: params.backgroundExecutor,
-          agentName: c.agentName,
+          agentName: target.agentName,
         }),
       };
     }

@@ -34,7 +34,9 @@ Telegram-specific parsing:
 
 Telegram chat commands are boss-only (non-boss users get no reply):
 - `/new` — request a session refresh for the bound agent
+- `/new <agent-name>` — request a session refresh for a named agent
 - `/status` — show `hiboss agent status` for the bound agent, including live background delegation counts
+- `/status <agent-name>` — show `hiboss agent status` for a named agent
 - `/abort` — cancel current run + clear **due** pending inbox for the bound agent
 - `/verbose` — show current verbose state for this chat
 - `/verbose on` — enable runtime status updates for this chat
