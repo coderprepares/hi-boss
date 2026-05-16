@@ -12,6 +12,7 @@ import type { RpcMethodRegistry } from "./ipc/types.js";
 import { RPC_ERRORS } from "./ipc/types.js";
 import type { ChatAdapter } from "../adapters/types.js";
 import { TelegramAdapter } from "../adapters/telegram.adapter.js";
+import { WechatClawbotAdapter } from "../adapters/wechat-clawbot.adapter.js";
 import { BACKGROUND_AGENT_NAME, DEFAULT_AGENT_PERMISSION_LEVEL } from "../shared/defaults.js";
 import { getHiBossPaths } from "../shared/hiboss-paths.js";
 import {
@@ -371,6 +372,9 @@ export class Daemon {
     switch (adapterType) {
       case "telegram":
         adapter = new TelegramAdapter(adapterToken);
+        break;
+      case "wechat-clawbot":
+        adapter = new WechatClawbotAdapter(adapterToken);
         break;
       default:
         logEvent("error", "adapter-unknown-type", { "adapter-type": adapterType });

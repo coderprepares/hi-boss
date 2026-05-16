@@ -9,6 +9,13 @@ import { AGENT_NAME_ERROR_MESSAGE, isValidAgentName } from "../shared/validation
 
 type EnrichedChannelCommand = ChannelCommand & { agentName?: string };
 
+function commandReason(command: EnrichedChannelCommand): string {
+  const platform = typeof command.platform === "string" && command.platform.trim()
+    ? command.platform.trim()
+    : "telegram";
+  return `${platform}:/${command.command}`;
+}
+
 function resolveTargetAgentName(command: EnrichedChannelCommand): { agentName: string } | { error: string } {
   if (typeof command.agentName !== "string" || !command.agentName) {
     return { error: "error: Agent not found" };
@@ -71,7 +78,7 @@ export function createChannelCommandHandler(params: {
         return { text: "error: Agent not found" };
       }
 
-      params.executor.requestSessionRefresh(agent.name, "telegram:/new");
+      params.executor.requestSessionRefresh(agent.name, commandReason(c));
       if (agent.name === c.agentName) {
         return { text: "Session refresh requested." };
       }
@@ -95,7 +102,7 @@ export function createChannelCommandHandler(params: {
     }
 
     if (c.command === "abort" && typeof c.agentName === "string" && c.agentName) {
-      const cancelledRun = params.executor.abortCurrentRun(c.agentName, "telegram:/abort");
+      const cancelledRun = params.executor.abortCurrentRun(c.agentName, commandReason(c));
       const clearedPendingCount = params.db.markDuePendingNonCronEnvelopesDoneForAgent(c.agentName);
       const lines = [
         "abort: ok",

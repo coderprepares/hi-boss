@@ -58,6 +58,7 @@ export class TelegramAdapter implements ChatAdapter {
     const rawText = typeof ctx.message?.text === "string" ? ctx.message.text : `/${commandName}`;
 
     const command: ChannelCommand = {
+      platform: this.platform,
       command: commandName,
       args: TelegramAdapter.extractCommandArgs(rawText, commandName),
       chatId,

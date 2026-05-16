@@ -25,6 +25,10 @@ Derived (not stored):
 | Agent | `agent:<name>` | `agent:nex` |
 | Channel | `channel:<adapter>:<chat-id>` | `channel:telegram:123456` |
 
+Adapter-specific channel examples:
+- Telegram: `channel:telegram:123456`
+- WeChat ClawBot: `channel:wechat-clawbot:test-account/wxid_boss`
+
 Reserved agent addresses:
 - `agent:background` — one-shot daemon-executed background job (see `docs/spec/components/agent.md`).
 

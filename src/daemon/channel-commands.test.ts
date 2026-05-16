@@ -47,6 +47,37 @@ test("telegram /new can target a named agent", async () => {
   assert.deepEqual(requested, [{ agentName: "kai", reason: "telegram:/new" }]);
 });
 
+test("channel /new reason uses command platform when provided", async () => {
+  const agents = new Map([
+    ["nex", makeAgent("nex", "speaker")],
+  ]);
+  const requested: Array<{ agentName: string; reason: string }> = [];
+  const handler = createChannelCommandHandler({
+    db: {
+      getAgentByNameCaseInsensitive(name: string) {
+        return agents.get(name.toLowerCase()) ?? null;
+      },
+    } as any,
+    executor: {
+      requestSessionRefresh(agentName: string, reason: string) {
+        requested.push({ agentName, reason });
+      },
+    } as any,
+    backgroundExecutor: {} as any,
+  });
+
+  await handler({
+    platform: "wechat-clawbot",
+    command: "new",
+    args: "",
+    chatId: "acct/wxid_boss",
+    authorId: "wxid_boss",
+    agentName: "nex",
+  } as any);
+
+  assert.deepEqual(requested, [{ agentName: "nex", reason: "wechat-clawbot:/new" }]);
+});
+
 test("telegram /status can target a named agent", async () => {
   const agents = new Map([
     ["nex", makeAgent("nex", "speaker")],

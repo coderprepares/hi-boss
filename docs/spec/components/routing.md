@@ -103,6 +103,14 @@ Scheduled delivery uses the same envelope record, but delays actual delivery unt
 
 See `docs/spec/components/scheduler.md` for the exact wake-up algorithm.
 
+### WeChat ClawBot Sidecar → Agent
+
+The WeChat ClawBot adapter follows the same envelope semantics as Telegram but
+uses a local sidecar contract for personal-WeChat ClawBot / OpenClaw weixin
+runtime isolation.
+
+See `docs/spec/adapters/wechat-clawbot.md`.
+
 ---
 
 ## `/new` Session Refresh (Telegram)

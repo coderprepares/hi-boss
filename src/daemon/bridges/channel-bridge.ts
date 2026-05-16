@@ -64,7 +64,10 @@ export class ChannelBridge {
     adapterToken: string,
     command: ChannelCommand
   ): Promise<MessageContent | void> {
-    const fromBoss = this.isBoss(adapter.platform, command.authorUsername);
+    const fromBoss = this.isBoss(adapter.platform, {
+      id: command.authorId,
+      username: command.authorUsername,
+    });
     if (!fromBoss) {
       // Boss-only commands: do not reply to non-boss users.
       return;
@@ -86,6 +89,7 @@ export class ChannelBridge {
     // Enrich command with agent name
     const enrichedCommand: ChannelCommand & { agentName: string } = {
       ...command,
+      platform: command.platform ?? adapter.platform,
       agentName: binding.agentName,
     };
 
@@ -100,7 +104,7 @@ export class ChannelBridge {
     message: ChannelMessage
   ): Promise<void> {
     const platform = adapter.platform;
-    const fromBoss = this.isBoss(platform, message.author.username);
+    const fromBoss = this.isBoss(platform, message.author);
 
     // Find the agent bound to this adapter
     const binding = this.db.getBindingByAdapter(platform, adapterToken);
@@ -154,16 +158,15 @@ export class ChannelBridge {
     });
   }
 
-  private isBoss(platform: string, username?: string): boolean {
-    if (!username) return false;
-
+  private isBoss(platform: string, identity: { id?: string; username?: string }): boolean {
     const adapterBossId = this.db.getAdapterBossId(platform);
     if (!adapterBossId) return false;
 
-    // Normalize comparison (handle @username vs username)
     const normalizedBoss = adapterBossId.replace(/^@/, '').toLowerCase();
-    const normalizedUser = username.replace(/^@/, '').toLowerCase();
+    const candidates = [identity.id, identity.username]
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      .map((value) => value.replace(/^@/, '').toLowerCase());
 
-    return normalizedBoss === normalizedUser;
+    return candidates.includes(normalizedBoss);
   }
 }

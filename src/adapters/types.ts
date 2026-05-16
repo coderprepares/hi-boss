@@ -128,7 +128,9 @@ export type ChannelMessageHandler = (message: ChannelMessage) => void | Promise<
 export interface ChannelCommand {
   command: string;           // Command name without slash (e.g., "new")
   args: string;              // Arguments after command
+  platform?: string;         // Adapter platform that produced the command
   chatId: string;            // Chat ID where command was issued
+  authorId?: string;         // Stable platform user/peer ID when available
   authorUsername?: string;   // Username of command issuer
 }
 

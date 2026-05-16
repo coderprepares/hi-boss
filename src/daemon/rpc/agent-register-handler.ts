@@ -88,7 +88,7 @@ export function createAgentRegisterHandler(ctx: DaemonContext): RpcMethodHandler
             }
           : undefined;
 
-      if (normalizedBind && normalizedBind.adapterType !== "telegram") {
+      if (normalizedBind && !["telegram", "wechat-clawbot"].includes(normalizedBind.adapterType)) {
         rpcError(RPC_ERRORS.INVALID_PARAMS, `Unknown adapter type: ${normalizedBind.adapterType}`);
       }
 

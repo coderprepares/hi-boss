@@ -39,6 +39,7 @@ CLI topics (details):
 
 Adapters:
 - `docs/spec/adapters/telegram.md` — Telegram adapter behavior and message schema
+- `docs/spec/adapters/wechat-clawbot.md` — WeChat ClawBot sidecar adapter behavior and message schema
 
 Providers (canonical behavior):
 - `docs/spec/provider-clis.md` — provider CLI invocation and token usage semantics
