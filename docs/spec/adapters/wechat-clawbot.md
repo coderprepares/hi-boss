@@ -11,6 +11,7 @@ Hi-Boss process.
 Key files:
 - `src/adapters/wechat-clawbot.adapter.ts` — Hi-Boss adapter skeleton
 - `src/adapters/wechat-clawbot/sidecar-client.ts` — sidecar contract client and mapping helpers
+- `src/wechat-clawbot-sidecar/` — local sidecar scaffold, file-backed state store, mock ingest endpoint, HTTP server, CLI
 - `src/daemon/bridges/channel-bridge.ts` — channel message/command → envelope bridge
 
 ## Scope
@@ -31,9 +32,14 @@ Out of scope for MVP:
 
 ## Sidecar Contract
 
-The sidecar is expected to be a local HTTP service. It may be implemented by
-forking `WeClawBot-API` to add an updates queue, or by implementing the iLink
-`getupdates` / `sendmessage` protocol directly.
+The sidecar is expected to be a local HTTP service. It may start from the
+in-repo `src/wechat-clawbot-sidecar/` scaffold, then add an explicit iLink /
+OpenClaw transport later.
+
+The initial in-repo sidecar is independent from the Hi-Boss daemon process. It
+uses Node's HTTP server, listens on `127.0.0.1` by default, stores local scaffold
+state in a mode-`0600` JSON file, and does not require real WeChat login for
+local tests.
 
 ### Auth
 
@@ -84,6 +90,10 @@ The sidecar is responsible for:
 - Deduplication using stable message identifiers.
 - Redacting tokens and `context_token` values from logs.
 
+The in-repo scaffold currently provides a file-backed queue with numeric opaque
+cursors. Events are deduplicated by stable `message_id` when available, falling
+back to `event_id`.
+
 ### `POST /accounts/:accountId/peers/:peerId/messages`
 
 Sends a text reply to a peer using the latest stored `context_token`.
@@ -106,6 +116,57 @@ Response:
 
 The sidecar should return a clear `4xx` error when the peer has no active
 `context_token` yet. Operators should have the peer send one test message first.
+
+### `GET /healthz`
+
+Returns sidecar process health. This endpoint intentionally does not require
+bearer auth so local supervisors can probe it.
+
+Response:
+
+```json
+{
+  "ok": true,
+  "service": "wechat-clawbot-sidecar"
+}
+```
+
+### `GET /accounts`
+
+Returns known local accounts and peer counts without secrets.
+
+Response:
+
+```json
+{
+  "accounts": [
+    {
+      "account_id": "test-account",
+      "peers": 1
+    }
+  ]
+}
+```
+
+### `POST /__mock/events`
+
+Development-only route enabled by `mockIngestEnabled: true`.
+
+Request:
+
+```json
+{
+  "account_id": "test-account",
+  "peer_id": "wxid_boss",
+  "peer_name": "Boss",
+  "message_id": "msg_1",
+  "text": "hello"
+}
+```
+
+This route creates a local event, stores a mock context reference for the peer,
+and makes the event visible through `GET /updates`. It is for mock adapter tests
+only and must stay disabled for real QR/iLink deployments.
 
 ## Adapter Binding
 
@@ -134,6 +195,83 @@ http://127.0.0.1:26322
 Do not include `apiToken`, `token`, iLink `bot_token`, QR codes, or
 `context_token` values in the adapter binding token.
 
+## In-Repo Sidecar Scaffold
+
+Run the local file-backed scaffold without real WeChat credentials:
+
+```bash
+npm run wechat-clawbot-sidecar
+```
+
+Default listener:
+
+```text
+http://127.0.0.1:26322
+```
+
+Environment configuration:
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `HIBOSS_WECHAT_CLAWBOT_HOST` | `127.0.0.1` | Bind host; keep loopback for MVP |
+| `HIBOSS_WECHAT_CLAWBOT_PORT` | `26322` | HTTP port |
+| `HIBOSS_WECHAT_CLAWBOT_STATE_FILE` | `.wechat-clawbot-sidecar/state.json` | File-backed scaffold state |
+| `HIBOSS_WECHAT_CLAWBOT_API_TOKEN_ENV` | unset | Env var name containing bearer token |
+| `HIBOSS_WECHAT_CLAWBOT_API_TOKEN_FILE` | unset | File containing bearer token; use mode `0600` |
+| `HIBOSS_WECHAT_CLAWBOT_MOCK_INGEST` | `false` | Enables `POST /__mock/events` for local tests |
+| `HIBOSS_WECHAT_CLAWBOT_DEFAULT_ACCOUNT` | unset | Fallback account for mock ingest |
+
+Equivalent JSON config:
+
+```json
+{
+  "host": "127.0.0.1",
+  "port": 26322,
+  "stateFile": "/root/hiboss/adapters/wechat-clawbot/state.json",
+  "apiTokenEnv": "HIBOSS_WECHAT_CLAWBOT_API_TOKEN",
+  "mockIngestEnabled": false,
+  "defaultAccount": "test-account"
+}
+```
+
+Example local mock run:
+
+```bash
+HIBOSS_WECHAT_CLAWBOT_MOCK_INGEST=true \
+HIBOSS_WECHAT_CLAWBOT_DEFAULT_ACCOUNT=test-account \
+npm run wechat-clawbot-sidecar
+```
+
+Then bind Hi-Boss with a placeholder adapter token shape:
+
+```json
+{
+  "baseUrl": "http://127.0.0.1:26322",
+  "pollIntervalMs": 2000
+}
+```
+
+If bearer auth is enabled, create a local token file outside the repo:
+
+```bash
+install -m 600 /dev/null /tmp/wechat-clawbot-sidecar-token
+printf '%s\n' '<replace-with-local-test-token>' > /tmp/wechat-clawbot-sidecar-token
+```
+
+Then set:
+
+```bash
+HIBOSS_WECHAT_CLAWBOT_API_TOKEN_FILE=/tmp/wechat-clawbot-sidecar-token
+```
+
+The sidecar config parser rejects inline `apiToken`, `token`, `botToken`, and
+`contextToken` fields. Secrets must be provided by env indirection or token
+files only.
+
+A real iLink/OpenClaw transport must be added explicitly and must keep iLink
+tokens, QR/login state, `get_updates_buf`, and `context_token` outside Hi-Boss
+envelopes, prompts, and logs.
+
 ## Address Format
 
 ```text
@@ -153,8 +291,8 @@ sets `defaultAccount`.
 
 ## Incoming Flow
 
-1. Sidecar logs in via QR code and polls iLink `getupdates`.
-2. Sidecar stores `get_updates_buf` and `context_token`.
+1. Sidecar obtains events from mock ingest, or later from iLink `getupdates`.
+2. Real transport stores `get_updates_buf` and `context_token` outside Hi-Boss.
 3. Hi-Boss adapter polls `GET /updates`.
 4. Each event becomes a `ChannelMessage`:
    - `platform = "wechat-clawbot"`
