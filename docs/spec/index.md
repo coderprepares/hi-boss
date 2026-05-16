@@ -50,3 +50,4 @@
 
 - Telegram adapter: `docs/spec/adapters/telegram.md`
 - WeChat ClawBot adapter: `docs/spec/adapters/wechat-clawbot.md`
+- WeChat ClawBot execution model: `docs/spec/adapters/wechat-clawbot-execution.md`

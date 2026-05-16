@@ -18,6 +18,12 @@ import {
 import { formatShortId } from "./id-format.js";
 import { parseAgentRoleFromMetadata } from "./agent-role.js";
 import { getExecutionLanePromptContext } from "./execution-lane.js";
+import {
+  buildInReplyTo,
+  buildSemanticFrom,
+  isChannelMetadata,
+  withBossMarkerSuffix,
+} from "./channel-prompt-context.js";
 
 const MAX_CUSTOM_FILE_CHARS = 10_000;
 
@@ -92,137 +98,10 @@ function formatAttachmentsText(attachments: EnvelopeAttachment[] | undefined): s
     .join("\n");
 }
 
-/**
- * Metadata structure for messages from channel adapters (e.g., Telegram).
- */
-interface ChannelMetadata {
-  platform: string;
-  channelMessageId: string;
-  author: { id: string; username?: string; displayName: string };
-  chat: { id: string; name?: string };
-  inReplyTo?: {
-    // Prefer channelMessageId, but accept legacy messageId from older stored metadata.
-    channelMessageId?: string;
-    messageId?: string;
-    author?: { id: string; username?: string; displayName: string };
-    text?: string;
-  };
-}
-
-function getFromNameOverride(metadata: unknown): string | undefined {
-  if (typeof metadata !== "object" || metadata === null) return undefined;
-  const m = metadata as Record<string, unknown>;
-  if (typeof m.fromName !== "string") return undefined;
-  const trimmed = m.fromName.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function isChannelMetadata(metadata: unknown): metadata is ChannelMetadata {
-  if (typeof metadata !== "object" || metadata === null) return false;
-  const m = metadata as Record<string, unknown>;
-  return (
-    typeof m.platform === "string" &&
-    typeof m.channelMessageId === "string" &&
-    typeof m.author === "object" &&
-    m.author !== null &&
-    typeof (m.author as Record<string, unknown>).id === "string" &&
-    typeof (m.author as Record<string, unknown>).displayName === "string" &&
-    typeof m.chat === "object" &&
-    m.chat !== null &&
-    typeof (m.chat as Record<string, unknown>).id === "string"
-  );
-}
-
-function stripBossMarkerSuffix(name: string): string {
-  const trimmed = name.trim();
-  return trimmed.replace(/\s\[boss\]$/, "");
-}
-
-function withBossMarkerSuffix(name: string, fromBoss: boolean): string {
-  const trimmed = name.trim();
-  if (!fromBoss) return trimmed;
-  if (!trimmed) return trimmed;
-  if (trimmed.endsWith("[boss]")) return trimmed;
-  return `${trimmed} [boss]`;
-}
-
 function getCronScheduleId(metadata: unknown): string | null {
   if (!metadata || typeof metadata !== "object") return null;
   const v = (metadata as Record<string, unknown>).cronScheduleId;
   return typeof v === "string" && v.trim() ? v.trim() : null;
-}
-
-interface SemanticFromResult {
-  fromName: string;
-  isGroup: boolean;
-  groupName: string;
-  authorName: string;
-}
-
-function buildSemanticFrom(envelope: Envelope): SemanticFromResult | undefined {
-  const metadata = envelope.metadata;
-  const override = getFromNameOverride(metadata);
-  if (override) {
-    const authorName = stripBossMarkerSuffix(override);
-    return {
-      fromName: withBossMarkerSuffix(authorName, envelope.fromBoss),
-      isGroup: false,
-      groupName: "",
-      authorName,
-    };
-  }
-  if (!isChannelMetadata(metadata)) return undefined;
-
-  const { author, chat } = metadata;
-  const authorName = author.username
-    ? `${author.displayName} (@${author.username})`
-    : author.displayName;
-
-  if (chat.name) {
-    // Group message
-    return {
-      fromName: `group "${chat.name}"`,
-      isGroup: true,
-      groupName: chat.name,
-      authorName,
-    };
-  } else {
-    return {
-      // Direct message - include [boss] suffix in fromName
-      fromName: withBossMarkerSuffix(authorName, envelope.fromBoss),
-      isGroup: false,
-      groupName: "",
-      authorName,
-    };
-  }
-}
-
-interface InReplyToPrompt {
-  fromName: string;
-  text: string;
-}
-
-function buildInReplyTo(metadata: unknown): InReplyToPrompt | undefined {
-  if (!isChannelMetadata(metadata)) return undefined;
-  const inReplyTo = metadata.inReplyTo;
-  if (!inReplyTo || typeof inReplyTo !== "object") return undefined;
-
-  const rt = inReplyTo as Record<string, unknown>;
-  const authorRaw = rt.author;
-  let fromName = "";
-  if (authorRaw && typeof authorRaw === "object") {
-    const a = authorRaw as Record<string, unknown>;
-    const displayName = typeof a.displayName === "string" ? a.displayName : "";
-    const username = typeof a.username === "string" ? a.username : "";
-    fromName = username ? `${displayName} (@${username})` : displayName;
-  }
-
-  const text = typeof rt.text === "string" && rt.text.trim() ? rt.text : "(none)";
-
-  return {
-    fromName,
-    text,
-  };
 }
 
 export function buildSystemPromptContext(params: {
