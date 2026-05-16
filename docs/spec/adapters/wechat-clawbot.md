@@ -272,6 +272,43 @@ Then bind Hi-Boss with a placeholder adapter token shape:
 }
 ```
 
+Local mock smoke flow:
+
+```bash
+export HIBOSS_WECHAT_CLAWBOT_API_TOKEN='local-test-token'
+export HIBOSS_WECHAT_CLAWBOT_MOCK_INGEST=true
+export HIBOSS_WECHAT_CLAWBOT_DEFAULT_ACCOUNT=test-account
+npm run wechat-clawbot-sidecar
+```
+
+In another shell, inject a test message:
+
+```bash
+curl -sS http://127.0.0.1:26322/__mock/events \
+  -H 'Authorization: Bearer local-test-token' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "account_id": "test-account",
+    "peer_id": "wxid_boss",
+    "peer_name": "Boss",
+    "message_id": "msg_1",
+    "text": "hello from mock wechat"
+  }'
+```
+
+Hi-Boss should bind the adapter with this token shape:
+
+```json
+{
+  "baseUrl": "http://127.0.0.1:26322",
+  "tokenEnv": "HIBOSS_WECHAT_CLAWBOT_API_TOKEN",
+  "pollIntervalMs": 2000
+}
+```
+
+The automated equivalent is covered by
+`src/adapters/wechat-clawbot.integration.test.ts`.
+
 If bearer auth is enabled, create a local token file outside the repo:
 
 ```bash
