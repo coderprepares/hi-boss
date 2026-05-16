@@ -10,6 +10,7 @@ import {
 } from "../shared/defaults.js";
 import { errorMessage, logEvent } from "../shared/daemon-log.js";
 import { executeBackgroundPrompt } from "./background-turn.js";
+import { parseExecutionLaneConfig } from "../shared/execution-lane.js";
 
 export interface BackgroundSenderAgentSnapshot {
   state: "idle" | "active";
@@ -104,6 +105,19 @@ export class BackgroundExecutor {
     this.senderCounts.set(senderAgentKey, next);
   }
 
+  private getSenderRunningLimit(senderAgentKey: string | null): number {
+    if (!senderAgentKey) return this.maxConcurrent;
+    const agent = this.deps.db.getAgentByNameCaseInsensitive(senderAgentKey);
+    const laneLimit = parseExecutionLaneConfig(agent?.metadata)?.backgroundMaxConcurrent;
+    return laneLimit ? Math.min(this.maxConcurrent, laneLimit) : this.maxConcurrent;
+  }
+
+  private canStartItem(item: BackgroundQueueItem): boolean {
+    if (!item.senderAgentKey) return true;
+    const counts = this.senderCounts.get(item.senderAgentKey) ?? { queuedCount: 0, runningCount: 0 };
+    return counts.runningCount < this.getSenderRunningLimit(item.senderAgentKey);
+  }
+
   /**
    * Enqueue a background envelope for execution (best-effort, non-blocking).
    *
@@ -131,7 +145,9 @@ export class BackgroundExecutor {
 
   private drain(): void {
     while (this.inFlight < this.maxConcurrent && this.queue.length > 0) {
-      const item = this.queue.shift()!;
+      const index = this.queue.findIndex((candidate) => this.canStartItem(candidate));
+      if (index < 0) return;
+      const [item] = this.queue.splice(index, 1);
       if (item.senderAgentKey) {
         this.updateSenderCounts(item.senderAgentKey, { queuedCount: -1, runningCount: 1 });
       }

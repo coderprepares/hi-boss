@@ -220,6 +220,7 @@ Behavior (canonical):
   - `to: agent:<sender>`
   - `metadata.replyToEnvelopeId: <background-request-envelope-uuid>`
 - **Live status visibility**: the daemon keeps an in-memory per-sender snapshot of queued/running background jobs for `hiboss agent status` and Telegram `/status` (`background-*` fields). This snapshot is not durable and is reset on daemon restart.
+- **Execution lane limit**: when the sender agent has `metadata.executionLane.backgroundMaxConcurrent`, `BackgroundExecutor` enforces that limit for jobs from that sender while still respecting the daemon-wide background concurrency cap.
 - **Failure feedback text**: provider/spawn/runtime failures are returned as `Background job failed: <error>` in the feedback envelope body.
 - **No-feedback edge cases**: if `from` is not an agent address or the sender agent cannot be resolved, the daemon logs and drops the background request without sending feedback.
 - **No conversation**: background jobs are one-shot and have no memory. Treat the feedback envelope as a result; do not send an acknowledgement reply. For follow-up work, send a new envelope to `agent:background` with full context (and a `replyToEnvelopeId` link).
@@ -252,6 +253,40 @@ See `docs/spec/cli/agents.md` (`hiboss agent set`) for binding flags.
 
 - Agents can only send to adapters they're bound to
 - Sending to `channel:telegram:...` requires a telegram binding
+
+## Execution Lanes
+
+Execution lanes are configured in speaker agent metadata under
+`metadata.executionLane`. They let operators split one adapter binding's inbound
+traffic by stable channel identity, while also giving each speaker a preferred
+default leader / leader pool and optional background job cap.
+
+Supported shape:
+
+```json
+{
+  "executionLane": {
+    "id": "lane-name",
+    "channelRoutes": [
+      {
+        "adapterType": "telegram",
+        "chatId": "123456",
+        "authorId": "42"
+      }
+    ],
+    "defaultLeader": "kai",
+    "leaderPool": ["kai", "mika"],
+    "backgroundMaxConcurrent": 1
+  }
+}
+```
+
+Notes:
+- `channelRoutes` live on the target speaker agent.
+- If no route matches, the adapter binding target remains the default speaker.
+- `defaultLeader` and `leaderPool` are injected into the speaker system prompt for delegation guidance.
+- `backgroundMaxConcurrent` is enforced for `agent:background` jobs sent by that speaker.
+- Do not store adapter tokens, bot tokens, iLink tokens, or `context_token` values in metadata.
 
 ## Session Policy
 

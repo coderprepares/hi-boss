@@ -41,17 +41,18 @@ See `docs/spec/adapters/telegram.md`.
 
 ## Channel Identity Routing & Execution Lanes
 
-Current MVP routing is binding-based: `ChannelBridge` finds the agent bound to
-the adapter identity that produced the message. For Telegram, the adapter
-identity is the bot token. For WeChat ClawBot, it is the sidecar adapter token.
-All messages from that adapter binding enter the same target agent.
+Base routing is binding-based: `ChannelBridge` finds the agent bound to the
+adapter identity that produced the message. For Telegram, the adapter identity
+is the bot token. For WeChat ClawBot, it is the sidecar adapter token. Without
+an execution-lane route, all messages from that adapter binding enter the same
+target agent.
 
 This means one bot with many users does **not** automatically execute in
 parallel. `AgentExecutor` holds a per-agent queue lock, so a single speaker
 agent processes one run at a time. Multiple users can enqueue work quickly, but
 their AI turns wait behind the same speaker if they share that speaker.
 
-The target design for higher concurrency is an explicit **execution lane**:
+Higher-concurrency deployments can configure an explicit **execution lane**:
 
 ```text
 channel identity -> speaker agent -> default leader / leader pool -> background limits
@@ -67,25 +68,63 @@ need isolation should assign both:
 - a default leader or leader pool for deeper work from that speaker;
 - optional background concurrency limits for one-shot delegated tasks.
 
-Future channel-routing rules should match on stable channel identity and choose
-the lane. Suggested match fields:
+Execution lane config is stored in speaker agent metadata under
+`metadata.executionLane`; no DB schema migration is required. `ChannelBridge`
+checks all agents for matching lane routes for both `ChannelMessage` and
+`ChannelCommand` inputs before falling back to the adapter binding target. Rule
+specificity prefers the most specific match.
+
+Example:
+
+```json
+{
+  "role": "speaker",
+  "executionLane": {
+    "id": "wechat-account-a",
+    "channelRoutes": [
+      {
+        "adapterType": "wechat-clawbot",
+        "accountId": "account-a"
+      }
+    ],
+    "defaultLeader": "kai-a",
+    "leaderPool": ["kai-a", "kai-b"],
+    "backgroundMaxConcurrent": 1
+  }
+}
+```
+
+Supported route fields:
 
 | Platform | Stable match fields |
 |----------|---------------------|
-| Telegram | `platform=telegram`, `adapter-token`, `chat.id`, `author.id` |
-| WeChat ClawBot | `platform=wechat-clawbot`, `adapter-token`, `account_id`, `peer_id` |
+| Telegram | `adapterType=telegram`, `chatId`, `authorId` |
+| WeChat ClawBot | `adapterType=wechat-clawbot`, `chatId`, `accountId`, `peerId`, `authorId` |
 
 Rule specificity should prefer the most specific match:
 1. exact user/peer route;
 2. exact chat/account route;
 3. adapter binding default route.
 
-Until explicit channel-routing rules exist, use multiple adapter bindings to
-create independent lanes:
+`adapterToken` is intentionally not part of the metadata route schema because
+adapter tokens are credentials. The adapter binding remains the default route
+and the internal credential holder. Do not put adapter tokens, bot tokens, iLink
+tokens, or `context_token` values in lane metadata because metadata is visible
+to the owning agent's prompt.
 
-- Telegram: one bot token per speaker when true parallel execution is required.
-- WeChat ClawBot: one sidecar/account binding per speaker when true parallel
-  execution is required.
+When a route matches, inbound envelope metadata includes a non-secret
+`executionLane` summary (`id`, source, speaker, default leader, leader pool,
+background limit). Speaker system prompts also receive the same lane guidance
+so P2 delegation prefers lane-local leaders instead of a shared global leader.
+
+`backgroundMaxConcurrent` is enforced by `BackgroundExecutor` per sender agent:
+the global background worker limit still applies, but a sender whose execution
+lane limit is reached will keep additional `agent:background` jobs queued while
+other senders can continue to use available global capacity.
+
+Use multiple adapter bindings when process-level isolation is desired, and
+metadata channel routes when one adapter/sidecar should split traffic by stable
+chat/user/account identity.
 
 The routing rules are an orchestration feature. They must not move platform
 credentials, bot tokens, iLink tokens, or `context_token` values into envelopes

@@ -17,6 +17,7 @@ import {
 } from "./defaults.js";
 import { formatShortId } from "./id-format.js";
 import { parseAgentRoleFromMetadata } from "./agent-role.js";
+import { getExecutionLanePromptContext } from "./execution-lane.js";
 
 const MAX_CUSTOM_FILE_CHARS = 10_000;
 
@@ -307,6 +308,7 @@ export function buildSystemPromptContext(params: {
           ? formatUnixMsAsTimeZoneOffset(params.agent.lastSeenAt, bossTimeZone)
           : "",
       metadata: params.agent.metadata ?? {},
+      executionLane: getExecutionLanePromptContext(params.agent.metadata),
       files: {
         soul: agentFiles.soul ?? "",
       },

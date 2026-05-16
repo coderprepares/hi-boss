@@ -10,6 +10,11 @@ import type { MessageRouter } from "../router/message-router.js";
 import type { HiBossDatabase } from "../db/database.js";
 import type { DaemonConfig } from "../daemon.js";
 import { errorMessage, logEvent } from "../../shared/daemon-log.js";
+import {
+  buildChannelRouteIdentity,
+  buildChannelRouteIdentityFromParts,
+  resolveExecutionLaneForChannel,
+} from "../../shared/execution-lane.js";
 
 /**
  * Bridge between ChannelMessages and Envelopes.
@@ -86,11 +91,21 @@ export class ChannelBridge {
       return { text: ChannelBridge.getUnboundAdapterText(adapter.platform) };
     }
 
-    // Enrich command with agent name
+    const laneResolution = resolveExecutionLaneForChannel({
+      agents: this.db.listAgents(),
+      fallbackAgentName: binding.agentName,
+      identity: buildChannelRouteIdentityFromParts({
+        adapterType: adapter.platform,
+        adapterToken,
+        chatId: command.chatId,
+        authorId: command.authorId,
+      }),
+    });
+
     const enrichedCommand: ChannelCommand & { agentName: string } = {
       ...command,
       platform: command.platform ?? adapter.platform,
-      agentName: binding.agentName,
+      agentName: laneResolution.agentName,
     };
 
     if (this.commandHandler) {
@@ -133,8 +148,13 @@ export class ChannelBridge {
       return;
     }
 
+    const laneResolution = resolveExecutionLaneForChannel({
+      agents: this.db.listAgents(),
+      fallbackAgentName: binding.agentName,
+      identity: buildChannelRouteIdentity({ adapterType: platform, adapterToken, message }),
+    });
     const fromAddress = formatChannelAddress(platform, message.chat.id);
-    const toAddress = formatAgentAddress(binding.agentName);
+    const toAddress = formatAgentAddress(laneResolution.agentName);
 
     await this.router.routeEnvelope({
       from: fromAddress,
@@ -153,6 +173,18 @@ export class ChannelBridge {
         channelMessageId: message.id,
         author: message.author,
         chat: message.chat,
+        ...(laneResolution.lane
+          ? {
+              executionLane: {
+                id: laneResolution.lane.id,
+                source: laneResolution.source,
+                speakerAgent: laneResolution.agentName,
+                defaultLeader: laneResolution.lane.defaultLeader,
+                leaderPool: laneResolution.lane.leaderPool,
+                backgroundMaxConcurrent: laneResolution.lane.backgroundMaxConcurrent,
+              },
+            }
+          : {}),
         ...(message.inReplyTo ? { inReplyTo: message.inReplyTo } : {}),
       },
     });

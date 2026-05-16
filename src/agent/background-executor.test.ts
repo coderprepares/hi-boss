@@ -46,6 +46,8 @@ async function waitFor(predicate: () => boolean, label: string): Promise<void> {
 class FakeDb {
   readonly statusUpdates: Array<{ id: string; status: EnvelopeStatus }> = [];
 
+  constructor(private readonly metadata?: Record<string, unknown>) {}
+
   updateEnvelopeStatus(id: string, status: EnvelopeStatus): void {
     this.statusUpdates.push({ id, status });
   }
@@ -56,6 +58,7 @@ class FakeDb {
     workspace: string;
     model?: string;
     reasoningEffort?: "low";
+    metadata?: Record<string, unknown>;
   } | null {
     if (name.toLowerCase() !== "nex") return null;
     return {
@@ -64,6 +67,7 @@ class FakeDb {
       workspace: "/tmp/workspace",
       model: "gpt-test",
       reasoningEffort: "low",
+      metadata: this.metadata,
     };
   }
 }
@@ -135,4 +139,50 @@ test("BackgroundExecutor tracks queued and running counts per sender agent", asy
     { id: "bg-1", status: "done" },
     { id: "bg-2", status: "done" },
   ]);
+});
+
+test("BackgroundExecutor enforces sender execution lane background limit", async () => {
+  const first = createDeferred<{ finalText: string }>();
+  const second = createDeferred<{ finalText: string }>();
+  const calls: string[] = [];
+  const db = new FakeDb({
+    role: "speaker",
+    executionLane: {
+      id: "lane-a",
+      backgroundMaxConcurrent: 1,
+    },
+  });
+  const router = new FakeRouter();
+  const executor = new BackgroundExecutor(
+    {
+      db: db as unknown as HiBossDatabase,
+      router: router as unknown as MessageRouter,
+    },
+    {
+      maxConcurrent: 2,
+      runPrompt: async ({ prompt }) => {
+        calls.push(prompt);
+        if (calls.length === 1) return first.promise;
+        return second.promise;
+      },
+    }
+  );
+
+  executor.enqueue(createEnvelope("bg-lane-1"));
+  executor.enqueue(createEnvelope("bg-lane-2"));
+
+  await waitFor(() => calls.length === 1, "first lane-limited background prompt start");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(calls.length, 1);
+  assert.deepEqual(executor.getSenderAgentSnapshot("nex"), {
+    state: "active",
+    queuedCount: 1,
+    runningCount: 1,
+    openCount: 2,
+  });
+
+  first.resolve({ finalText: "done 1" });
+  await waitFor(() => calls.length === 2, "second lane-limited background prompt start");
+  second.resolve({ finalText: "done 2" });
+  await waitFor(() => router.routed.length === 2, "lane-limited feedback delivery");
 });

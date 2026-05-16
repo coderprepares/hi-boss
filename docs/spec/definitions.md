@@ -172,6 +172,7 @@ Table: `agents` (see `src/daemon/db/schema.ts`)
 
 - `metadata.sessionHandle`: persisted session resume handle (see `docs/spec/components/session.md`). This key is maintained by the daemon, preserved across `hiboss agent set --metadata-*` and `hiboss agent set --clear-metadata`, and ignored if provided by the user.
 - `metadata.role`: logical agent role (`speaker` or `leader`).
+- `metadata.executionLane`: optional speaker lane config for channel route matching, preferred leader delegation, leader pools, and sender-scoped background limits. See `docs/spec/components/routing.md`.
 - On daemon startup, legacy agents with missing/invalid `metadata.role` are backfilled from binding state and persisted (`bound => speaker`, `unbound => leader`).
 
 ### CLI

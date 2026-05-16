@@ -94,6 +94,7 @@ Notes:
 - `--role speaker` requires at least one resulting binding in the same command.
 - `--bind-adapter-*` and `--unbind-adapter-type` may be used together for same-command binding swaps.
 - `--bind-adapter-*` alone replaces an existing binding token for that same adapter type on the target agent (atomic replace).
+- Execution lanes are configured with `--metadata-json` / `--metadata-file` using `metadata.executionLane`; keep credentials out of metadata.
 
 Provider-home behavior follows `docs/spec/cli/conventions.md#provider-homes`.
 
@@ -111,6 +112,182 @@ Output (parseable):
 - `session-daily-reset-at:` (optional)
 - `session-idle-timeout:` (optional)
 - `session-max-context-length:` (optional)
+
+### Execution Lane Runbook
+
+Execution lanes split one adapter binding by stable channel identity, then give
+that lane its own speaker, default leader / leader pool guidance, and optional
+background job cap. See `docs/spec/components/routing.md#channel-identity-routing--execution-lanes`
+for daemon routing semantics.
+
+#### 1. Configure a lane on the target speaker
+
+Create a metadata file for the speaker that should receive the lane. `agent set`
+replaces user metadata, while preserving the internal `sessionHandle`; include
+any other existing custom metadata keys you still need. Do not include adapter
+tokens, bot tokens, iLink tokens, or `context_token` values.
+
+Minimal Telegram lane:
+
+```bash
+cat > /tmp/nex-telegram-lane.json <<'JSON'
+{
+  "executionLane": {
+    "id": "boss-telegram",
+    "channelRoutes": [
+      {
+        "adapterType": "telegram",
+        "chatId": "1124674058",
+        "authorId": "1124674058"
+      }
+    ],
+    "defaultLeader": "kai",
+    "leaderPool": ["kai"],
+    "backgroundMaxConcurrent": 1
+  }
+}
+JSON
+
+hiboss agent set --name nex --metadata-file /tmp/nex-telegram-lane.json
+```
+
+Minimal WeChat ClawBot lane:
+
+```bash
+cat > /tmp/wechat-speaker-lane.json <<'JSON'
+{
+  "executionLane": {
+    "id": "boss-wechat",
+    "channelRoutes": [
+      {
+        "adapterType": "wechat-clawbot",
+        "accountId": "d24a7e25e5bd@im.bot",
+        "peerId": "o9cq807H2WYX2riwsrUEKvN1j4QA@im.wechat"
+      }
+    ],
+    "defaultLeader": "kai",
+    "leaderPool": ["kai"],
+    "backgroundMaxConcurrent": 1
+  }
+}
+JSON
+
+hiboss agent set --name wechat-speaker --metadata-file /tmp/wechat-speaker-lane.json
+```
+
+You can also pass the same JSON inline:
+
+```bash
+hiboss agent set --name nex --metadata-json '{"executionLane":{"id":"boss-telegram","channelRoutes":[{"adapterType":"telegram","chatId":"1124674058"}],"defaultLeader":"kai","leaderPool":["kai"],"backgroundMaxConcurrent":1}}'
+```
+
+#### 2. Choose route fields
+
+Route fields are matched against the inbound channel identity:
+
+| Field | Meaning |
+|-------|---------|
+| `adapterType` | Adapter platform, e.g. `telegram` or `wechat-clawbot`. |
+| `chatId` | Platform chat/conversation id. For WeChat ClawBot this is usually `<accountId>/<peerId>`. |
+| `authorId` | Platform sender id when available. |
+| `accountId` | WeChat ClawBot account id parsed from `<accountId>/<peerId>`. |
+| `peerId` | WeChat ClawBot peer id; also matches `authorId` for direct messages. |
+
+Examples:
+
+```json
+{ "adapterType": "telegram", "chatId": "-1001234567890" }
+{ "adapterType": "telegram", "chatId": "-1001234567890", "authorId": "1124674058" }
+{ "adapterType": "wechat-clawbot", "accountId": "d24a7e25e5bd@im.bot" }
+{ "adapterType": "wechat-clawbot", "accountId": "d24a7e25e5bd@im.bot", "peerId": "o9cq807H2WYX2riwsrUEKvN1j4QA@im.wechat" }
+```
+
+If multiple routes match, Hi-Boss prefers the most specific route. If no route
+matches, `ChannelBridge` falls back to the original adapter binding target, so
+existing bot behavior continues to work.
+
+#### 3. Check and validate after configuration
+
+Basic agent check:
+
+```bash
+hiboss agent list
+hiboss agent status --name nex
+```
+
+Metadata check:
+
+```bash
+hiboss setup export --out /tmp/hiboss-config-check.json
+```
+
+Inspect `agents[].metadata.executionLane` in the exported file, then protect or
+delete the export because setup export includes adapter binding tokens.
+
+Routing smoke checks:
+
+- Send a normal message from the target Telegram chat/user or WeChat peer and
+  confirm it is delivered to the lane speaker instead of the binding fallback.
+- Send a channel command such as `/status` or `/new` from the same chat/user and
+  confirm the command targets the same lane speaker.
+- Use `hiboss envelope thread --envelope-id <id>` on the resulting envelope or
+  feedback thread to confirm the recipient agent and the non-secret lane summary
+  when it appears in prompt/thread context.
+
+Prompt guidance check:
+
+```bash
+npm run prompts:check
+```
+
+Then trigger a fresh run for the speaker, or refresh the speaker session if you
+need prompt changes to apply immediately:
+
+```bash
+hiboss agent refresh --name nex
+```
+
+Background cap check, if `backgroundMaxConcurrent` is set:
+
+```bash
+# Run these with the lane speaker's agent token, not the boss token.
+hiboss envelope send --to agent:background --text "lane background test 1"
+hiboss envelope send --to agent:background --text "lane background test 2"
+hiboss agent status --name <lane-speaker-name>
+```
+
+The status output should show `background-running-count` at or below the lane
+limit, with extra work in `background-queued-count`, while the daemon-wide
+background concurrency cap still applies.
+
+#### 4. Roll back
+
+Remove the lane by restoring previous metadata, writing metadata without
+`executionLane`, or clearing all user metadata:
+
+```bash
+hiboss agent set --name nex --metadata-json '{}'
+```
+
+or:
+
+```bash
+hiboss agent set --name nex --clear-metadata
+```
+
+After rollback, the adapter binding remains the default route and channel
+messages continue to enter the bound speaker.
+
+#### 5. Current limitations
+
+- There is no dedicated `hiboss lane` CLI; lanes are metadata managed through
+  `hiboss agent set --metadata-json` / `--metadata-file`.
+- `defaultLeader` and `leaderPool` are prompt guidance for the speaker, not a
+  hard routing policy enforced by the daemon.
+- `backgroundMaxConcurrent` only limits `agent:background` jobs sent by that
+  speaker; it does not limit leader-agent queues.
+- Lane metadata is visible to the owning agent's prompt. Never store secrets,
+  adapter tokens, iLink bot tokens, QR data, or `context_token` values there.
 
 ## `hiboss agent delete`
 
