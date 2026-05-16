@@ -177,7 +177,7 @@ test("sidecar iLink transport polls updates and sends through context token", as
       url: String(input),
       body: JSON.parse(String(init?.body ?? "{}")),
     });
-    if (String(input).endsWith("/getupdates")) {
+    if (String(input).endsWith("/ilink/bot/getupdates")) {
       return new Response(JSON.stringify({
         get_updates_buf: "cursor-1",
         message_list: [{
@@ -213,8 +213,8 @@ test("sidecar iLink transport polls updates and sends through context token", as
     });
     assert.equal(sent.status, 200);
     assert.equal(sent.body.ok, true);
-    assert.ok(requests.some((request) => request.url.endsWith("/getupdates")));
-    assert.ok(requests.some((request) => request.url.endsWith("/sendmessage")));
+    assert.ok(requests.some((request) => request.url.endsWith("/ilink/bot/getupdates")));
+    assert.ok(requests.some((request) => request.url.endsWith("/ilink/bot/sendmessage")));
   } finally {
     delete process.env.ILINK_TOKEN;
     await sidecar.stop();

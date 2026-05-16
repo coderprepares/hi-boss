@@ -43,9 +43,10 @@ local tests.
 
 The sidecar has two transport modes:
 - `mock` — default, local-only development mode with optional mock event ingest.
-- `ilink` — calls OpenClaw/iLink-style `getupdates` and `sendmessage` endpoints
-  using bot tokens supplied by env or token files. It does not perform QR login;
-  operators must provision valid bot tokens/login state outside Hi-Boss.
+- `ilink` — calls OpenClaw/iLink-style `/ilink/bot/getupdates` and
+  `/ilink/bot/sendmessage` endpoints using bot tokens supplied by env or token
+  files. It does not perform QR login; operators must provision valid bot
+  tokens/login state outside Hi-Boss.
 
 ### Auth
 
@@ -212,6 +213,12 @@ Run the local file-backed scaffold without real WeChat credentials:
 npm run wechat-clawbot-sidecar
 ```
 
+Print safe local token setup guidance:
+
+```bash
+npm run wechat-clawbot-sidecar -- login-help
+```
+
 Default listener:
 
 ```text
@@ -311,8 +318,8 @@ The sidecar sends iLink requests with:
 - optional `X-WECHAT-UIN`
 
 For `getupdates`, it POSTs the persisted `get_updates_buf`. For
-`sendmessage`, it POSTs the latest stored peer `context_token` and a text
-`item_list`. Bot tokens must be provided through `botTokenEnv` or
+`sendmessage`, it POSTs `msg.context_token` with a text item in
+`msg.item_list`. Bot tokens must be provided through `botTokenEnv` or
 `botTokenFile`; inline bot tokens are rejected.
 
 ## Address Format

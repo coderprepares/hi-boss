@@ -7,7 +7,9 @@ import {
 import { WechatClawbotSidecarServer } from "./server.js";
 
 function printUsage(): void {
-  console.log(`Usage: tsx src/wechat-clawbot-sidecar/main.ts [--config ./sidecar.json]
+  console.log(`Usage:
+  tsx src/wechat-clawbot-sidecar/main.ts [--config ./sidecar.json]
+  tsx src/wechat-clawbot-sidecar/main.ts login-help
 
 Environment defaults:
   HIBOSS_WECHAT_CLAWBOT_HOST
@@ -24,9 +26,41 @@ Environment defaults:
 `);
 }
 
+function printLoginHelp(): void {
+  console.log(`WeChat ClawBot login/token setup
+
+This sidecar does not embed QR login yet. Use the official OpenClaw weixin
+plugin or a trusted iLink login helper to obtain a bot token, then store it in a
+root-only file:
+
+  install -m 700 -d /root/hiboss/adapters/wechat-clawbot
+  install -m 600 /dev/null /root/hiboss/adapters/wechat-clawbot/ilink-bot-token
+  printf '%s\\n' '<paste-token-locally>' > /root/hiboss/adapters/wechat-clawbot/ilink-bot-token
+
+Then reference the token file from sidecar config:
+
+  {
+    "transport": "ilink",
+    "stateFile": "/root/hiboss/adapters/wechat-clawbot/state.json",
+    "ilinkAccounts": [
+      {
+        "accountId": "test-account",
+        "botTokenFile": "/root/hiboss/adapters/wechat-clawbot/ilink-bot-token"
+      }
+    ]
+  }
+
+Do not send bot tokens, QR data, context tokens, or state files through chat.
+`);
+}
+
 async function main(): Promise<void> {
   if (process.argv.includes("--help") || process.argv.includes("-h")) {
     printUsage();
+    return;
+  }
+  if (process.argv.slice(2).includes("login-help")) {
+    printLoginHelp();
     return;
   }
 

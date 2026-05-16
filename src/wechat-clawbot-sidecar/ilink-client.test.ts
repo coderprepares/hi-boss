@@ -33,11 +33,16 @@ test("iLink client sends official auth headers and normalizes text updates", asy
     xWechatUin: "12345",
   }, "cursor-1");
 
-  assert.equal(requests[0].url, "https://ilink.example.test/getupdates");
+  assert.equal(requests[0].url, "https://ilink.example.test/ilink/bot/getupdates");
   assert.equal(requests[0].headers.get("AuthorizationType"), "ilink_bot_token");
   assert.equal(requests[0].headers.get("Authorization"), "Bearer test-bot-token");
   assert.equal(requests[0].headers.get("X-WECHAT-UIN"), "12345");
-  assert.deepEqual(requests[0].body, { get_updates_buf: "cursor-1" });
+  assert.deepEqual(requests[0].body, {
+    get_updates_buf: "cursor-1",
+    base_info: {
+      channel_version: "1.0.0",
+    },
+  });
   assert.equal(result.nextCursor, "cursor-2");
   assert.deepEqual(result.messages, [{
     messageId: "msg-1",
@@ -65,9 +70,9 @@ test("iLink client sends text with context token", async () => {
 
   await client.sendText({ accountId: "acct", botTokenEnv: "ILINK_TOKEN" }, "context-1", "reply");
 
-  assert.equal(requests[0].url, "https://ilink.example.test/sendmessage");
-  assert.deepEqual(requests[0].body, {
-    context_token: "context-1",
-    item_list: [{ type: "TEXT", text: "reply" }],
-  });
+  assert.equal(requests[0].url, "https://ilink.example.test/ilink/bot/sendmessage");
+  assert.equal(requests[0].body.msg.context_token, "context-1");
+  assert.equal(requests[0].body.msg.item_list[0].type, 1);
+  assert.deepEqual(requests[0].body.msg.item_list[0].text_item, { text: "reply" });
+  assert.equal(requests[0].body.base_info.channel_version, "1.0.2");
 });

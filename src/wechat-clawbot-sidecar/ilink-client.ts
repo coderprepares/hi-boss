@@ -33,6 +33,14 @@ function arrayField(record: Record<string, unknown>, ...keys: string[]): unknown
   return [];
 }
 
+function numberField(record: Record<string, unknown>, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
 function normalizeBaseUrl(raw: string): string {
   const url = new URL(raw);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
@@ -48,15 +56,19 @@ function textFromItemList(raw: unknown): string | undefined {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
     const record = item as Record<string, unknown>;
     const itemType = stringField(record, "type", "item_type", "itemType")?.toUpperCase();
-    const text = stringField(record, "text", "content");
-    if (text && (!itemType || itemType === "TEXT")) parts.push(text);
+    const numericType = numberField(record, "type");
+    const textItem = record.text_item && typeof record.text_item === "object"
+      ? record.text_item as Record<string, unknown>
+      : {};
+    const text = stringField(record, "text", "content") ?? stringField(textItem, "text");
+    if (text && (!itemType || itemType === "TEXT" || numericType === 1)) parts.push(text);
   }
   return parts.length > 0 ? parts.join("") : undefined;
 }
 
 function normalizeMessages(raw: unknown): IlinkTextMessage[] {
   const record = objectRecord(raw, "iLink getupdates response");
-  const messages = arrayField(record, "message_list", "messageList", "messages", "updates");
+  const messages = arrayField(record, "msgs", "message_list", "messageList", "messages", "updates");
   const result: IlinkTextMessage[] = [];
 
   for (const rawMessage of messages) {
@@ -96,8 +108,11 @@ export class WechatClawbotIlinkClient {
     account: WechatClawbotIlinkAccountConfig,
     getUpdatesBuf: string
   ): Promise<{ messages: IlinkTextMessage[]; nextCursor: string }> {
-    const data = await this.post(account, "/getupdates", {
+    const data = await this.post(account, "/ilink/bot/getupdates", {
       get_updates_buf: getUpdatesBuf,
+      base_info: {
+        channel_version: "1.0.0",
+      },
     });
     const record = objectRecord(data, "iLink getupdates response");
     return {
@@ -111,9 +126,22 @@ export class WechatClawbotIlinkClient {
     contextToken: string,
     text: string
   ): Promise<void> {
-    await this.post(account, "/sendmessage", {
-      context_token: contextToken,
-      item_list: [{ type: "TEXT", text }],
+    await this.post(account, "/ilink/bot/sendmessage", {
+      msg: {
+        from_user_id: "",
+        to_user_id: "",
+        client_id: `hiboss-wechat-clawbot:${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        message_type: 2,
+        message_state: 2,
+        context_token: contextToken,
+        item_list: [{
+          type: 1,
+          text_item: { text },
+        }],
+      },
+      base_info: {
+        channel_version: "1.0.2",
+      },
     });
   }
 
