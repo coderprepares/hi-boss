@@ -18,6 +18,7 @@ function emptyState(): WechatClawbotSidecarState {
     peers: [],
     sent_messages: [],
     seen_keys: [],
+    account_cursors: {},
   };
 }
 
@@ -48,6 +49,10 @@ function ensureStateShape(value: unknown): WechatClawbotSidecarState {
     peers: Array.isArray(record.peers) ? record.peers : [],
     sent_messages: Array.isArray(record.sent_messages) ? record.sent_messages : [],
     seen_keys: Array.isArray(record.seen_keys) ? record.seen_keys.filter((item) => typeof item === "string") : [],
+    account_cursors:
+      record.account_cursors && typeof record.account_cursors === "object" && !Array.isArray(record.account_cursors)
+        ? record.account_cursors as Record<string, string>
+        : {},
   };
 }
 
@@ -75,6 +80,20 @@ export class WechatClawbotStateStore {
       .slice(0, 100);
     const next = events.length > 0 ? events[events.length - 1].seq : after;
     return { events, next_cursor: String(next) };
+  }
+
+  getAccountCursor(accountId: string): string {
+    return this.state.account_cursors[accountId] ?? "";
+  }
+
+  setAccountCursor(accountId: string, cursor: string): void {
+    this.state.account_cursors[accountId] = cursor;
+    this.save();
+  }
+
+  getPeerContextToken(accountId: string, peerId: string): string | undefined {
+    return this.state.peers.find((peer) => peer.account_id === accountId && peer.peer_id === peerId)
+      ?.context_token_ref;
   }
 
   ingestEvent(
@@ -144,6 +163,19 @@ export class WechatClawbotStateStore {
       account_id: accountId,
       peer_id: peerId,
       text: trimmed,
+      created_at: new Date().toISOString(),
+    };
+    this.state.sent_messages.push(sent);
+    this.save();
+    return sent;
+  }
+
+  recordSentText(accountId: string, peerId: string, text: string): StoredWechatClawbotSentMessage {
+    const sent: StoredWechatClawbotSentMessage = {
+      id: `sent_${Date.now()}_${this.state.sent_messages.length + 1}`,
+      account_id: accountId,
+      peer_id: peerId,
+      text: text.trim(),
       created_at: new Date().toISOString(),
     };
     this.state.sent_messages.push(sent);

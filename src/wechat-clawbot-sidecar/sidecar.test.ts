@@ -17,17 +17,23 @@ function tempStateFile(): string {
 
 async function startSidecar(
   overrides: Partial<WechatClawbotSidecarConfig> = {},
-  apiToken?: string
+  apiToken?: string,
+  ilinkFetchImpl?: typeof fetch
 ): Promise<WechatClawbotSidecarServer> {
   const sidecar = new WechatClawbotSidecarServer({
     host: "127.0.0.1",
     port: 0,
     stateFile: tempStateFile(),
+    transport: "mock",
     mockIngestEnabled: true,
     allowNonLocalBind: false,
     defaultAccount: "acct",
+    pollIntervalMs: 2000,
+    requestTimeoutMs: 1000,
+    ilinkApiBaseUrl: "https://ilink.example.test",
+    ilinkAccounts: [],
     ...overrides,
-  }, { apiToken });
+  }, { apiToken, ilinkFetchImpl });
   await sidecar.start();
   return sidecar;
 }
@@ -146,4 +152,71 @@ test("sidecar rejects inline secret and placeholder config fields", () => {
     () => loadWechatClawbotSidecarConfig(configPath, {}),
     /Do not store sidecar API tokens inline/
   );
+});
+
+test("sidecar rejects inline iLink bot tokens and requires account token indirection", () => {
+  const configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "wechat-clawbot-ilink-config-")), "sidecar.json");
+  fs.writeFileSync(configPath, JSON.stringify({
+    transport: "ilink",
+    ilinkAccounts: [{
+      accountId: "acct",
+      botToken: "replace-me",
+    }],
+  }));
+
+  assert.throws(
+    () => loadWechatClawbotSidecarConfig(configPath, {}),
+    /Do not store iLink tokens inline/
+  );
+});
+
+test("sidecar iLink transport polls updates and sends through context token", async () => {
+  const requests: Array<{ url: string; body: any }> = [];
+  const ilinkFetchImpl: typeof fetch = async (input, init) => {
+    requests.push({
+      url: String(input),
+      body: JSON.parse(String(init?.body ?? "{}")),
+    });
+    if (String(input).endsWith("/getupdates")) {
+      return new Response(JSON.stringify({
+        get_updates_buf: "cursor-1",
+        message_list: [{
+          message_id: "msg-1",
+          from_user_id: "wxid_boss",
+          context_token: "context-1",
+          text: "hello",
+        }],
+      }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+
+  process.env.ILINK_TOKEN = "test-bot-token";
+  const sidecar = await startSidecar({
+    transport: "ilink",
+    pollIntervalMs: 250,
+    requestTimeoutMs: 1000,
+    ilinkApiBaseUrl: "http://127.0.0.1:1",
+    ilinkAccounts: [{ accountId: "acct", botTokenEnv: "ILINK_TOKEN" }],
+  }, undefined, ilinkFetchImpl);
+
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const updates = await fetchJson(`${sidecar.url()}/updates`);
+    assert.equal(updates.body.events.length, 1);
+    assert.equal(updates.body.events[0].peer_id, "wxid_boss");
+
+    const sent = await fetchJson(`${sidecar.url()}/accounts/acct/peers/wxid_boss/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "reply" }),
+    });
+    assert.equal(sent.status, 200);
+    assert.equal(sent.body.ok, true);
+    assert.ok(requests.some((request) => request.url.endsWith("/getupdates")));
+    assert.ok(requests.some((request) => request.url.endsWith("/sendmessage")));
+  } finally {
+    delete process.env.ILINK_TOKEN;
+    await sidecar.stop();
+  }
 });

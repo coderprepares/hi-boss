@@ -41,6 +41,12 @@ uses Node's HTTP server, listens on `127.0.0.1` by default, stores local scaffol
 state in a mode-`0600` JSON file, and does not require real WeChat login for
 local tests.
 
+The sidecar has two transport modes:
+- `mock` — default, local-only development mode with optional mock event ingest.
+- `ilink` — calls OpenClaw/iLink-style `getupdates` and `sendmessage` endpoints
+  using bot tokens supplied by env or token files. It does not perform QR login;
+  operators must provision valid bot tokens/login state outside Hi-Boss.
+
 ### Auth
 
 The sidecar may require `Authorization: Bearer <api-token>`.
@@ -90,9 +96,11 @@ The sidecar is responsible for:
 - Deduplication using stable message identifiers.
 - Redacting tokens and `context_token` values from logs.
 
-The in-repo scaffold currently provides a file-backed queue with numeric opaque
-cursors. Events are deduplicated by stable `message_id` when available, falling
-back to `event_id`.
+The in-repo scaffold provides a file-backed queue with numeric opaque cursors.
+Events are deduplicated by stable `message_id` when available, falling back to
+`event_id`. In `ilink` transport mode, the sidecar persists each account's
+`get_updates_buf` and each peer's latest `context_token` reference in the local
+state file.
 
 ### `POST /accounts/:accountId/peers/:peerId/messages`
 
@@ -127,7 +135,8 @@ Response:
 ```json
 {
   "ok": true,
-  "service": "wechat-clawbot-sidecar"
+  "service": "wechat-clawbot-sidecar",
+  "transport": "mock"
 }
 ```
 
@@ -216,10 +225,14 @@ Environment configuration:
 | `HIBOSS_WECHAT_CLAWBOT_HOST` | `127.0.0.1` | Bind host; keep loopback for MVP |
 | `HIBOSS_WECHAT_CLAWBOT_PORT` | `26322` | HTTP port |
 | `HIBOSS_WECHAT_CLAWBOT_STATE_FILE` | `.wechat-clawbot-sidecar/state.json` | File-backed scaffold state |
+| `HIBOSS_WECHAT_CLAWBOT_TRANSPORT` | `mock` | `mock` or `ilink` |
 | `HIBOSS_WECHAT_CLAWBOT_API_TOKEN_ENV` | unset | Env var name containing bearer token |
 | `HIBOSS_WECHAT_CLAWBOT_API_TOKEN_FILE` | unset | File containing bearer token; use mode `0600` |
 | `HIBOSS_WECHAT_CLAWBOT_MOCK_INGEST` | `false` | Enables `POST /__mock/events` for local tests |
 | `HIBOSS_WECHAT_CLAWBOT_DEFAULT_ACCOUNT` | unset | Fallback account for mock ingest |
+| `HIBOSS_WECHAT_CLAWBOT_ILINK_API_BASE_URL` | `https://ilinkai.weixin.qq.com` | iLink API root |
+| `HIBOSS_WECHAT_CLAWBOT_POLL_INTERVAL_MS` | `2000` | iLink poll interval |
+| `HIBOSS_WECHAT_CLAWBOT_REQUEST_TIMEOUT_MS` | `35000` | iLink HTTP timeout |
 
 Equivalent JSON config:
 
@@ -228,6 +241,7 @@ Equivalent JSON config:
   "host": "127.0.0.1",
   "port": 26322,
   "stateFile": "/root/hiboss/adapters/wechat-clawbot/state.json",
+  "transport": "mock",
   "apiTokenEnv": "HIBOSS_WECHAT_CLAWBOT_API_TOKEN",
   "mockIngestEnabled": false,
   "defaultAccount": "test-account"
@@ -272,6 +286,35 @@ A real iLink/OpenClaw transport must be added explicitly and must keep iLink
 tokens, QR/login state, `get_updates_buf`, and `context_token` outside Hi-Boss
 envelopes, prompts, and logs.
 
+Example `ilink` transport config:
+
+```json
+{
+  "host": "127.0.0.1",
+  "port": 26322,
+  "stateFile": "/root/hiboss/adapters/wechat-clawbot/state.json",
+  "transport": "ilink",
+  "apiTokenFile": "/root/hiboss/adapters/wechat-clawbot/api-token",
+  "ilinkAccounts": [
+    {
+      "accountId": "test-account",
+      "botTokenFile": "/root/hiboss/adapters/wechat-clawbot/ilink-bot-token",
+      "xWechatUin": "123456"
+    }
+  ]
+}
+```
+
+The sidecar sends iLink requests with:
+- `AuthorizationType: ilink_bot_token`
+- `Authorization: Bearer <bot-token>`
+- optional `X-WECHAT-UIN`
+
+For `getupdates`, it POSTs the persisted `get_updates_buf`. For
+`sendmessage`, it POSTs the latest stored peer `context_token` and a text
+`item_list`. Bot tokens must be provided through `botTokenEnv` or
+`botTokenFile`; inline bot tokens are rejected.
+
 ## Address Format
 
 ```text
@@ -291,8 +334,8 @@ sets `defaultAccount`.
 
 ## Incoming Flow
 
-1. Sidecar obtains events from mock ingest, or later from iLink `getupdates`.
-2. Real transport stores `get_updates_buf` and `context_token` outside Hi-Boss.
+1. Sidecar obtains events from mock ingest or iLink `getupdates`.
+2. iLink transport stores `get_updates_buf` and `context_token` outside Hi-Boss.
 3. Hi-Boss adapter polls `GET /updates`.
 4. Each event becomes a `ChannelMessage`:
    - `platform = "wechat-clawbot"`

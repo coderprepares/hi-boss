@@ -5,6 +5,7 @@ import type { WechatClawbotSidecarConfig } from "./types.js";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 26322;
+const DEFAULT_ILINK_API_BASE_URL = "https://ilinkai.weixin.qq.com";
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -36,6 +37,12 @@ function objectRecord(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function objectArray(value: unknown, label: string): Array<Record<string, unknown>> {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error(`Invalid ${label}`);
+  return value.map((item) => objectRecord(item, label));
+}
+
 function assertLocalBind(host: string, allowNonLocalBind: boolean): void {
   const normalized = host.toLowerCase();
   const localHosts = new Set(["127.0.0.1", "localhost", "::1"]);
@@ -55,6 +62,12 @@ export function loadWechatClawbotSidecarConfig(
   if ("apiToken" in raw || "token" in raw || "botToken" in raw || "contextToken" in raw) {
     throw new Error("Do not store sidecar API tokens inline; use apiTokenEnv or apiTokenFile");
   }
+  const rawIlinkAccounts = objectArray(raw.ilinkAccounts, "ilinkAccounts");
+  for (const account of rawIlinkAccounts) {
+    if ("botToken" in account || "token" in account || "contextToken" in account) {
+      throw new Error("Do not store iLink tokens inline; use botTokenEnv or botTokenFile");
+    }
+  }
 
   const stateFile =
     stringValue(raw.stateFile) ??
@@ -70,6 +83,10 @@ export function loadWechatClawbotSidecarConfig(
     host: stringValue(raw.host) ?? stringValue(env.HIBOSS_WECHAT_CLAWBOT_HOST) ?? DEFAULT_HOST,
     port: numberValue(raw.port) ?? numberValue(env.HIBOSS_WECHAT_CLAWBOT_PORT) ?? DEFAULT_PORT,
     stateFile,
+    transport:
+      stringValue(raw.transport) === "ilink" || stringValue(env.HIBOSS_WECHAT_CLAWBOT_TRANSPORT) === "ilink"
+        ? "ilink"
+        : "mock",
     apiTokenEnv: stringValue(raw.apiTokenEnv) ?? stringValue(env.HIBOSS_WECHAT_CLAWBOT_API_TOKEN_ENV),
     apiTokenFile: stringValue(raw.apiTokenFile) ?? stringValue(env.HIBOSS_WECHAT_CLAWBOT_API_TOKEN_FILE),
     mockIngestEnabled:
@@ -78,10 +95,37 @@ export function loadWechatClawbotSidecarConfig(
       false,
     allowNonLocalBind,
     defaultAccount: stringValue(raw.defaultAccount) ?? stringValue(env.HIBOSS_WECHAT_CLAWBOT_DEFAULT_ACCOUNT),
+    pollIntervalMs: numberValue(raw.pollIntervalMs) ?? numberValue(env.HIBOSS_WECHAT_CLAWBOT_POLL_INTERVAL_MS) ?? 2000,
+    requestTimeoutMs: numberValue(raw.requestTimeoutMs) ?? numberValue(env.HIBOSS_WECHAT_CLAWBOT_REQUEST_TIMEOUT_MS) ?? 35000,
+    ilinkApiBaseUrl:
+      stringValue(raw.ilinkApiBaseUrl) ??
+      stringValue(env.HIBOSS_WECHAT_CLAWBOT_ILINK_API_BASE_URL) ??
+      DEFAULT_ILINK_API_BASE_URL,
+    ilinkAccounts: rawIlinkAccounts.map((account) => ({
+      accountId: stringValue(account.accountId) ?? stringValue(account.account_id) ?? "",
+      botTokenEnv: stringValue(account.botTokenEnv) ?? stringValue(account.bot_token_env),
+      botTokenFile: stringValue(account.botTokenFile) ?? stringValue(account.bot_token_file),
+      xWechatUin: stringValue(account.xWechatUin) ?? stringValue(account.x_wechat_uin),
+    })),
   };
 
   if (config.port < 0 || config.port > 65535) {
     throw new Error("Invalid sidecar port");
+  }
+  if (config.pollIntervalMs < 250) {
+    throw new Error("Invalid sidecar pollIntervalMs (must be >= 250)");
+  }
+  if (config.requestTimeoutMs < 1000) {
+    throw new Error("Invalid sidecar requestTimeoutMs (must be >= 1000)");
+  }
+  if (config.transport === "ilink") {
+    if (config.ilinkAccounts.length === 0) throw new Error("iLink transport requires ilinkAccounts");
+    for (const account of config.ilinkAccounts) {
+      if (!account.accountId) throw new Error("iLink account requires accountId");
+      if (!account.botTokenEnv && !account.botTokenFile) {
+        throw new Error("iLink account requires botTokenEnv or botTokenFile");
+      }
+    }
   }
   assertLocalBind(config.host, config.allowNonLocalBind);
   return config;
@@ -100,6 +144,21 @@ export function resolveWechatClawbotSidecarApiToken(
     if (token) return token;
   }
   return undefined;
+}
+
+export function resolveWechatClawbotIlinkBotToken(
+  config: { botTokenEnv?: string; botTokenFile?: string },
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  if (config.botTokenEnv) {
+    const token = env[config.botTokenEnv]?.trim();
+    if (token) return token;
+  }
+  if (config.botTokenFile) {
+    const token = fs.readFileSync(config.botTokenFile, "utf8").trim();
+    if (token) return token;
+  }
+  throw new Error("Missing iLink bot token");
 }
 
 export function parseSidecarCliArgs(argv: string[]): { configPath?: string; overrides: string[] } {

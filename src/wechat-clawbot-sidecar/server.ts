@@ -1,6 +1,7 @@
 import * as http from "http";
 import { timingSafeEqual } from "crypto";
 
+import { WechatClawbotIlinkClient } from "./ilink-client.js";
 import { WechatClawbotStateStore } from "./state.js";
 import {
   SidecarHttpError,
@@ -68,12 +69,22 @@ function routeSendMessage(parts: string[]): { accountId: string; peerId: string 
 export class WechatClawbotSidecarServer {
   private server: http.Server;
   private store: WechatClawbotStateStore;
+  private ilink?: WechatClawbotIlinkClient;
+  private pollTimer?: NodeJS.Timeout;
+  private stopped = true;
 
   constructor(
     private config: WechatClawbotSidecarConfig,
     private runtime: WechatClawbotSidecarRuntimeOptions = {}
   ) {
     this.store = new WechatClawbotStateStore(config.stateFile);
+    if (config.transport === "ilink") {
+      this.ilink = new WechatClawbotIlinkClient({
+        apiBaseUrl: config.ilinkApiBaseUrl,
+        requestTimeoutMs: config.requestTimeoutMs,
+        fetchImpl: runtime.ilinkFetchImpl,
+      });
+    }
     this.server = http.createServer((req, res) => {
       this.handle(req, res).catch((err) => this.handleError(res, err));
     });
@@ -84,12 +95,16 @@ export class WechatClawbotSidecarServer {
       this.server.once("error", reject);
       this.server.listen(this.config.port, this.config.host, () => {
         this.server.off("error", reject);
+        this.stopped = false;
+        this.startPolling();
         resolve();
       });
     });
   }
 
   async stop(): Promise<void> {
+    this.stopped = true;
+    if (this.pollTimer) clearTimeout(this.pollTimer);
     await new Promise<void>((resolve, reject) => {
       this.server.close((err) => (err ? reject(err) : resolve()));
     });
@@ -108,7 +123,11 @@ export class WechatClawbotSidecarServer {
     const parts = decodeParts(url);
 
     if (req.method === "GET" && url.pathname === "/healthz") {
-      json(res, 200, { ok: true, service: "wechat-clawbot-sidecar" });
+      json(res, 200, {
+        ok: true,
+        service: "wechat-clawbot-sidecar",
+        transport: this.config.transport,
+      });
       return;
     }
 
@@ -138,7 +157,7 @@ export class WechatClawbotSidecarServer {
     if (req.method === "POST" && sendTarget) {
       const body = await readJsonBody(req);
       const text = typeof body.text === "string" ? body.text : "";
-      const sent = this.store.sendText(sendTarget.accountId, sendTarget.peerId, text);
+      const sent = await this.sendText(sendTarget.accountId, sendTarget.peerId, text);
       json(res, 200, { ok: true, message_id: sent.id });
       return;
     }
@@ -156,5 +175,49 @@ export class WechatClawbotSidecarServer {
       return;
     }
     json(res, 500, { ok: false, error: "internal-error", message: "internal sidecar error" });
+  }
+
+  private startPolling(): void {
+    if (!this.ilink || this.stopped) return;
+    this.pollTimer = setTimeout(async () => {
+      await this.pollIlinkOnce().catch(() => undefined);
+      this.startPolling();
+    }, this.config.pollIntervalMs);
+  }
+
+  private async pollIlinkOnce(): Promise<void> {
+    if (!this.ilink) return;
+    for (const account of this.config.ilinkAccounts) {
+      const cursor = this.store.getAccountCursor(account.accountId);
+      const updates = await this.ilink.fetchUpdates(account, cursor);
+      for (const message of updates.messages) {
+        this.store.ingestEvent({
+          account_id: account.accountId,
+          peer_id: message.fromUserId,
+          message_id: message.messageId,
+          event_id: `${account.accountId}:${message.messageId}`,
+          text: message.text,
+          context_token_ref: message.contextToken,
+        });
+      }
+      this.store.setAccountCursor(account.accountId, updates.nextCursor);
+    }
+  }
+
+  private async sendText(accountId: string, peerId: string, text: string) {
+    if (!this.ilink) return this.store.sendText(accountId, peerId, text);
+    const trimmed = text.trim();
+    const account = this.config.ilinkAccounts.find((item) => item.accountId === accountId);
+    if (!account) throw new SidecarHttpError(404, "account-not-found", "iLink account not found");
+    const contextToken = this.store.getPeerContextToken(accountId, peerId);
+    if (!contextToken) {
+      throw new SidecarHttpError(
+        409,
+        "missing-context-token",
+        "peer has no active context token; have the peer send one test message first"
+      );
+    }
+    await this.ilink.sendText(account, contextToken, trimmed);
+    return this.store.recordSentText(accountId, peerId, trimmed);
   }
 }

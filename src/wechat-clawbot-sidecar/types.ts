@@ -2,15 +2,28 @@ export interface WechatClawbotSidecarConfig {
   host: string;
   port: number;
   stateFile: string;
+  transport: "mock" | "ilink";
   apiTokenEnv?: string;
   apiTokenFile?: string;
   mockIngestEnabled: boolean;
   allowNonLocalBind: boolean;
   defaultAccount?: string;
+  pollIntervalMs: number;
+  requestTimeoutMs: number;
+  ilinkApiBaseUrl: string;
+  ilinkAccounts: WechatClawbotIlinkAccountConfig[];
+}
+
+export interface WechatClawbotIlinkAccountConfig {
+  accountId: string;
+  botTokenEnv?: string;
+  botTokenFile?: string;
+  xWechatUin?: string;
 }
 
 export interface WechatClawbotSidecarRuntimeOptions {
   apiToken?: string;
+  ilinkFetchImpl?: (input: string | URL, init?: RequestInit) => Promise<Response>;
 }
 
 export interface StoredWechatClawbotEvent {
@@ -47,6 +60,7 @@ export interface WechatClawbotSidecarState {
   peers: WechatClawbotPeerState[];
   sent_messages: StoredWechatClawbotSentMessage[];
   seen_keys: string[];
+  account_cursors: Record<string, string>;
 }
 
 export interface IncomingWechatClawbotEvent {
@@ -63,6 +77,14 @@ export interface IncomingWechatClawbotEvent {
   peerName?: string;
   context_token_ref?: string;
   contextTokenRef?: string;
+}
+
+export interface IlinkTextMessage {
+  messageId: string;
+  fromUserId: string;
+  text: string;
+  contextToken: string;
+  createTimeMs?: number;
 }
 
 export class SidecarHttpError extends Error {
