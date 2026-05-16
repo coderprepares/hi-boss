@@ -4,11 +4,14 @@ import * as path from "path";
 import {
   SidecarHttpError,
   type IncomingWechatClawbotEvent,
+  type WechatClawbotPendingOutboundMessage,
   type StoredWechatClawbotEvent,
   type StoredWechatClawbotSentMessage,
   type WechatClawbotPeerState,
   type WechatClawbotSidecarState,
 } from "./types.js";
+
+const CONTEXT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 function emptyState(): WechatClawbotSidecarState {
   return {
@@ -17,6 +20,7 @@ function emptyState(): WechatClawbotSidecarState {
     events: [],
     peers: [],
     sent_messages: [],
+    pending_outbox: [],
     seen_keys: [],
     account_cursors: {},
   };
@@ -48,6 +52,7 @@ function ensureStateShape(value: unknown): WechatClawbotSidecarState {
     events: Array.isArray(record.events) ? record.events : [],
     peers: Array.isArray(record.peers) ? record.peers : [],
     sent_messages: Array.isArray(record.sent_messages) ? record.sent_messages : [],
+    pending_outbox: Array.isArray(record.pending_outbox) ? record.pending_outbox : [],
     seen_keys: Array.isArray(record.seen_keys) ? record.seen_keys.filter((item) => typeof item === "string") : [],
     account_cursors:
       record.account_cursors && typeof record.account_cursors === "object" && !Array.isArray(record.account_cursors)
@@ -137,6 +142,8 @@ export class WechatClawbotStateStore {
       peer_id: peerId,
       peer_name: event.peer_name,
       context_token_ref: stringField(input, "context_token_ref", "contextTokenRef") ?? `mock:${event.event_id}`,
+      context_expires_at: new Date(new Date(now).getTime() + CONTEXT_WINDOW_MS).toISOString(),
+      context_expiry_reminded_at: undefined,
       updated_at: now,
     });
     this.save();
@@ -181,6 +188,68 @@ export class WechatClawbotStateStore {
     this.state.sent_messages.push(sent);
     this.save();
     return sent;
+  }
+
+  recordPendingOutbound(
+    accountId: string,
+    peerId: string,
+    text: string,
+    reason: string,
+    error?: string
+  ): WechatClawbotPendingOutboundMessage {
+    const pending: WechatClawbotPendingOutboundMessage = {
+      id: `pending_${Date.now()}_${this.state.pending_outbox.length + 1}`,
+      account_id: accountId,
+      peer_id: peerId,
+      text: text.trim(),
+      reason,
+      created_at: new Date().toISOString(),
+      attempts: 1,
+      last_error: error,
+    };
+    this.state.pending_outbox.push(pending);
+    this.save();
+    return pending;
+  }
+
+  takePendingOutbound(accountId: string, peerId: string): WechatClawbotPendingOutboundMessage[] {
+    const pending = this.state.pending_outbox.filter(
+      (item) => item.account_id === accountId && item.peer_id === peerId
+    );
+    if (pending.length === 0) return [];
+    this.state.pending_outbox = this.state.pending_outbox.filter(
+      (item) => item.account_id !== accountId || item.peer_id !== peerId
+    );
+    this.save();
+    return pending;
+  }
+
+  restorePendingOutbound(messages: WechatClawbotPendingOutboundMessage[], error?: string): void {
+    if (messages.length === 0) return;
+    const restored = messages.map((message) => ({
+      ...message,
+      attempts: message.attempts + 1,
+      last_error: error ?? message.last_error,
+    }));
+    this.state.pending_outbox.unshift(...restored);
+    this.save();
+  }
+
+  listPeersNeedingExpiryReminder(now = new Date()): WechatClawbotPeerState[] {
+    const nowMs = now.getTime();
+    const soonMs = nowMs + 60 * 60 * 1000;
+    return this.state.peers.filter((peer) => {
+      if (!peer.context_token_ref || !peer.context_expires_at || peer.context_expiry_reminded_at) return false;
+      const expiresMs = Date.parse(peer.context_expires_at);
+      return Number.isFinite(expiresMs) && expiresMs > nowMs && expiresMs <= soonMs;
+    });
+  }
+
+  markExpiryReminderSent(accountId: string, peerId: string): void {
+    const peer = this.state.peers.find((item) => item.account_id === accountId && item.peer_id === peerId);
+    if (!peer) return;
+    peer.context_expiry_reminded_at = new Date().toISOString();
+    this.save();
   }
 
   private upsertPeer(peer: WechatClawbotPeerState): void {

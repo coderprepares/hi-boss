@@ -39,6 +39,60 @@ See `docs/spec/adapters/telegram.md`.
 
 ---
 
+## Channel Identity Routing & Execution Lanes
+
+Current MVP routing is binding-based: `ChannelBridge` finds the agent bound to
+the adapter identity that produced the message. For Telegram, the adapter
+identity is the bot token. For WeChat ClawBot, it is the sidecar adapter token.
+All messages from that adapter binding enter the same target agent.
+
+This means one bot with many users does **not** automatically execute in
+parallel. `AgentExecutor` holds a per-agent queue lock, so a single speaker
+agent processes one run at a time. Multiple users can enqueue work quickly, but
+their AI turns wait behind the same speaker if they share that speaker.
+
+The target design for higher concurrency is an explicit **execution lane**:
+
+```text
+channel identity -> speaker agent -> default leader / leader pool -> background limits
+```
+
+A lane is the unit of isolation for conversational state, provider sessions,
+work queues, and operational ownership. Splitting only the speaker is not always
+enough: if several speakers delegate heavy work to the same leader, those heavy
+tasks can still queue behind that shared leader. Production deployments that
+need isolation should assign both:
+
+- a speaker for the channel/user/account entrypoint;
+- a default leader or leader pool for deeper work from that speaker;
+- optional background concurrency limits for one-shot delegated tasks.
+
+Future channel-routing rules should match on stable channel identity and choose
+the lane. Suggested match fields:
+
+| Platform | Stable match fields |
+|----------|---------------------|
+| Telegram | `platform=telegram`, `adapter-token`, `chat.id`, `author.id` |
+| WeChat ClawBot | `platform=wechat-clawbot`, `adapter-token`, `account_id`, `peer_id` |
+
+Rule specificity should prefer the most specific match:
+1. exact user/peer route;
+2. exact chat/account route;
+3. adapter binding default route.
+
+Until explicit channel-routing rules exist, use multiple adapter bindings to
+create independent lanes:
+
+- Telegram: one bot token per speaker when true parallel execution is required.
+- WeChat ClawBot: one sidecar/account binding per speaker when true parallel
+  execution is required.
+
+The routing rules are an orchestration feature. They must not move platform
+credentials, bot tokens, iLink tokens, or `context_token` values into envelopes
+or agent prompts.
+
+---
+
 ## Envelope Flow (Inbound)
 
 ### Telegram → Agent

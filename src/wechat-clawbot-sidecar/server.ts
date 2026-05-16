@@ -6,6 +6,7 @@ import { WechatClawbotStateStore } from "./state.js";
 import {
   SidecarHttpError,
   type IncomingWechatClawbotEvent,
+  type WechatClawbotIlinkAccountConfig,
   type WechatClawbotSidecarConfig,
   type WechatClawbotSidecarRuntimeOptions,
 } from "./types.js";
@@ -64,6 +65,10 @@ function routeSendMessage(parts: string[]): { accountId: string; peerId: string 
   if (parts.length !== 5) return undefined;
   if (parts[0] !== "accounts" || parts[2] !== "peers" || parts[4] !== "messages") return undefined;
   return { accountId: parts[1], peerId: parts[3] };
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 export class WechatClawbotSidecarServer {
@@ -199,9 +204,11 @@ export class WechatClawbotSidecarServer {
           text: message.text,
           context_token_ref: message.contextToken,
         });
+        await this.flushPendingOutbound(account, message.fromUserId).catch(() => undefined);
       }
       this.store.setAccountCursor(account.accountId, updates.nextCursor);
     }
+    await this.sendExpiryReminders().catch(() => undefined);
   }
 
   private async sendText(accountId: string, peerId: string, text: string) {
@@ -217,7 +224,51 @@ export class WechatClawbotSidecarServer {
         "peer has no active context token; have the peer send one test message first"
       );
     }
-    await this.ilink.sendText(account, contextToken, trimmed);
+    try {
+      await this.ilink.sendText(account, peerId, contextToken, trimmed);
+    } catch (err) {
+      this.store.recordPendingOutbound(accountId, peerId, trimmed, "send-failed", errorMessage(err));
+      throw new SidecarHttpError(502, "send-failed-queued", "send failed; message queued for next peer activation");
+    }
     return this.store.recordSentText(accountId, peerId, trimmed);
+  }
+
+  private async flushPendingOutbound(account: WechatClawbotIlinkAccountConfig, peerId: string): Promise<void> {
+    if (!this.ilink) return;
+    const pending = this.store.takePendingOutbound(account.accountId, peerId);
+    if (pending.length === 0) return;
+    const contextToken = this.store.getPeerContextToken(account.accountId, peerId);
+    if (!contextToken) {
+      this.store.restorePendingOutbound(pending, "missing context token during flush");
+      return;
+    }
+    const text = pending.length === 1
+      ? pending[0].text
+      : [
+          `你离线期间有 ${pending.length} 条待发送消息：`,
+          ...pending.map((message, index) => `${index + 1}. ${message.text}`),
+        ].join("\n");
+    try {
+      await this.ilink.sendText(account, peerId, contextToken, text);
+      this.store.recordSentText(account.accountId, peerId, text);
+    } catch (err) {
+      this.store.restorePendingOutbound(pending, errorMessage(err));
+    }
+  }
+
+  private async sendExpiryReminders(): Promise<void> {
+    if (!this.ilink) return;
+    for (const peer of this.store.listPeersNeedingExpiryReminder()) {
+      const account = this.config.ilinkAccounts.find((item) => item.accountId === peer.account_id);
+      if (!account || !peer.context_token_ref) continue;
+      const text = "微信 ClawBot 回复窗口快过期了。如需继续接收后续消息，请回复任意一句话来续期。";
+      try {
+        await this.ilink.sendText(account, peer.peer_id, peer.context_token_ref, text);
+        this.store.recordSentText(peer.account_id, peer.peer_id, text);
+        this.store.markExpiryReminderSent(peer.account_id, peer.peer_id);
+      } catch {
+        this.store.markExpiryReminderSent(peer.account_id, peer.peer_id);
+      }
+    }
   }
 }

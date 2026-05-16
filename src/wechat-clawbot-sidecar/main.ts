@@ -4,11 +4,13 @@ import {
   parseSidecarCliArgs,
   resolveWechatClawbotSidecarApiToken,
 } from "./config.js";
+import { runWechatClawbotLogin } from "./login.js";
 import { WechatClawbotSidecarServer } from "./server.js";
 
 function printUsage(): void {
   console.log(`Usage:
   tsx src/wechat-clawbot-sidecar/main.ts [--config ./sidecar.json]
+  tsx src/wechat-clawbot-sidecar/main.ts login [--config ./sidecar.json]
   tsx src/wechat-clawbot-sidecar/main.ts login-help
 
 Environment defaults:
@@ -55,16 +57,25 @@ Do not send bot tokens, QR data, context tokens, or state files through chat.
 }
 
 async function main(): Promise<void> {
+  const args = process.argv.slice(2);
   if (process.argv.includes("--help") || process.argv.includes("-h")) {
     printUsage();
     return;
   }
-  if (process.argv.slice(2).includes("login-help")) {
+  if (args.includes("login-help")) {
     printLoginHelp();
     return;
   }
+  if (args.includes("login")) {
+    const { configPath, overrides } = parseSidecarCliArgs(args.filter((arg) => arg !== "login"));
+    if (overrides.length > 0) {
+      throw new Error(`Unknown arguments: ${overrides.join(" ")}`);
+    }
+    await runWechatClawbotLogin({ configPath });
+    return;
+  }
 
-  const { configPath, overrides } = parseSidecarCliArgs(process.argv.slice(2));
+  const { configPath, overrides } = parseSidecarCliArgs(args);
   if (overrides.length > 0) {
     throw new Error(`Unknown arguments: ${overrides.join(" ")}`);
   }

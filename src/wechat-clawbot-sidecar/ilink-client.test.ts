@@ -53,6 +53,35 @@ test("iLink client sends official auth headers and normalizes text updates", asy
   }]);
 });
 
+test("iLink client accepts numeric message ids from real iLink updates", async () => {
+  const client = new WechatClawbotIlinkClient({
+    apiBaseUrl: "https://ilink.example.test",
+    requestTimeoutMs: 1000,
+    env: { ILINK_TOKEN: "test-bot-token" },
+    fetchImpl: async () => new Response(JSON.stringify({
+      get_updates_buf: "cursor-2",
+      msgs: [{
+        message_id: 7461333195478521000,
+        from_user_id: "wxid_boss",
+        context_token: "context-1",
+        item_list: [{
+          type: 1,
+          text_item: { text: "测试2" },
+        }],
+      }],
+    }), { status: 200 }),
+  });
+
+  const result = await client.fetchUpdates({
+    accountId: "acct",
+    botTokenEnv: "ILINK_TOKEN",
+  }, "cursor-1");
+
+  assert.equal(result.messages.length, 1);
+  assert.equal(result.messages[0].messageId, "7461333195478521000");
+  assert.equal(result.messages[0].text, "测试2");
+});
+
 test("iLink client sends text with context token", async () => {
   const requests: Array<{ url: string; body: any }> = [];
   const client = new WechatClawbotIlinkClient({
@@ -68,11 +97,12 @@ test("iLink client sends text with context token", async () => {
     },
   });
 
-  await client.sendText({ accountId: "acct", botTokenEnv: "ILINK_TOKEN" }, "context-1", "reply");
+  await client.sendText({ accountId: "acct", botTokenEnv: "ILINK_TOKEN" }, "wxid_boss", "context-1", "reply");
 
   assert.equal(requests[0].url, "https://ilink.example.test/ilink/bot/sendmessage");
+  assert.equal(requests[0].body.msg.to_user_id, "wxid_boss");
   assert.equal(requests[0].body.msg.context_token, "context-1");
   assert.equal(requests[0].body.msg.item_list[0].type, 1);
   assert.deepEqual(requests[0].body.msg.item_list[0].text_item, { text: "reply" });
-  assert.equal(requests[0].body.base_info.channel_version, "1.0.2");
+  assert.equal(requests[0].body.base_info.channel_version, "1.0.3");
 });

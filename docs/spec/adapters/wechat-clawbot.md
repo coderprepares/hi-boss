@@ -93,7 +93,10 @@ Required event fields:
 The sidecar is responsible for:
 - QR login and login-state persistence.
 - iLink `get_updates_buf` persistence.
-- `context_token` persistence per `account_id + peer_id`.
+- `context_token` persistence per `account_id + peer_id`, including the
+  local reply-window expiry time derived from the latest inbound message.
+- Pending outbound persistence when iLink `sendmessage` fails because the
+  reply context is expired or otherwise unusable.
 - Deduplication using stable message identifiers.
 - Redacting tokens and `context_token` values from logs.
 
@@ -101,7 +104,12 @@ The in-repo scaffold provides a file-backed queue with numeric opaque cursors.
 Events are deduplicated by stable `message_id` when available, falling back to
 `event_id`. In `ilink` transport mode, the sidecar persists each account's
 `get_updates_buf` and each peer's latest `context_token` reference in the local
-state file.
+state file. The context is treated as a reply window, not a one-reply token:
+multiple outbound messages may be sent while the context remains valid. When an
+outbound send fails, the sidecar records the attempted text in a local
+`pending_outbox`. The next inbound message from the same peer refreshes the
+context and the sidecar attempts to flush pending messages, merging multiple
+pending items into a single summary when appropriate.
 
 ### `POST /accounts/:accountId/peers/:peerId/messages`
 
@@ -125,6 +133,9 @@ Response:
 
 The sidecar should return a clear `4xx` error when the peer has no active
 `context_token` yet. Operators should have the peer send one test message first.
+If iLink rejects an attempted send after a peer context exists, the sidecar
+queues the text in `pending_outbox` and returns an error indicating that the
+message was queued for the next peer activation.
 
 ### `GET /healthz`
 
@@ -218,6 +229,24 @@ Print safe local token setup guidance:
 ```bash
 npm run wechat-clawbot-sidecar -- login-help
 ```
+
+Start QR login directly in the terminal:
+
+```bash
+npm run wechat-clawbot-sidecar -- login --config /root/hiboss/adapters/wechat-clawbot/sidecar.json
+```
+
+The command:
+- Fetches a WeChat ClawBot QR code from `/ilink/bot/get_bot_qrcode?bot_type=3`.
+- Renders the QR code in the terminal.
+- Polls `/ilink/bot/get_qrcode_status` until confirmed, expired, or timed out.
+- Writes the returned bot token to
+  `/root/hiboss/adapters/wechat-clawbot/<account-id>.bot-token` with mode
+  `0600`.
+- Updates the sidecar config with `transport: "ilink"` and an `ilinkAccounts`
+  entry that points to `botTokenFile`.
+
+The token value is never printed and is not written inline into config.
 
 Default listener:
 
@@ -376,10 +405,59 @@ The slash-separated chat id lets the adapter route replies to the correct
 sidecar account and peer. Bare peer ids are only valid when the adapter binding
 sets `defaultAccount`.
 
+## Multi-Account Execution Model
+
+The sidecar can hold multiple iLink bot accounts in one local process. Account
+state is isolated by `account_id`:
+- each account has its own bot token indirection;
+- each account has its own persisted `get_updates_buf`;
+- peer context tokens, reply-window expiry, and pending outbound queues are
+  keyed by `account_id + peer_id`;
+- outbound replies always include the target `account_id` and `peer_id`, so
+  messages are not sent through the wrong bot account.
+
+This account isolation does **not** automatically imply independent AI
+execution. The execution model depends on how adapter bindings are assigned.
+Use the execution-lane model in `docs/spec/components/routing.md`: a production
+lane should include the channel/account route, speaker agent, and default
+leader or leader pool. Splitting only the speaker can still bottleneck deeper
+work if all speakers delegate to the same leader.
+
+- **Single adapter binding to one speaker agent** — all account traffic enters
+  the same speaker. This keeps deployment simple, but agent runs queue behind
+  that speaker; a long task for account A can delay account B.
+- **One adapter binding per account/sidecar, each bound to a different speaker
+  agent and leader lane** — execution can proceed in parallel because each
+  lane has its own speaker queue, provider session, and leader/delegation path.
+  This is the recommended first production shape for multiple accounts.
+- **Future account-aware dispatch** — one sidecar could expose all accounts
+  while Hi-Boss routes by `account_id` or `account_id + peer_id` to different
+  execution lanes. This would require explicit routing configuration and is not
+  part of the MVP adapter.
+
+The current in-repo sidecar polls accounts sequentially. This is acceptable for
+MVP because iLink polling is lightweight. If account count or network latency
+becomes material, sidecar polling can be changed to per-account concurrent
+polling without changing the `channel:wechat-clawbot:<account-id>/<peer-id>`
+address contract. The larger user-visible bottleneck is usually the AI
+execution queue, not sidecar polling.
+
+Recommended multi-account rollout:
+1. Start with one WeChat bot account per speaker agent when parallel execution
+   matters.
+2. Use separate sidecar configs, ports, state files, and PM2 process names for
+   strong operational isolation.
+3. Bind each speaker to only its own sidecar adapter token, and assign a
+   separate default leader or leader pool if deeper work must not queue behind
+   another account's work.
+4. Add dynamic account-aware dispatch only after the simple per-account lane
+   layout becomes operationally inconvenient.
+
 ## Incoming Flow
 
 1. Sidecar obtains events from mock ingest or iLink `getupdates`.
-2. iLink transport stores `get_updates_buf` and `context_token` outside Hi-Boss.
+2. iLink transport stores `get_updates_buf`, `context_token`, context expiry,
+   and pending outbound messages outside Hi-Boss.
 3. Hi-Boss adapter polls `GET /updates`.
 4. Each event becomes a `ChannelMessage`:
    - `platform = "wechat-clawbot"`
@@ -396,6 +474,8 @@ sets `defaultAccount`.
 2. Router verifies the sender agent has a `wechat-clawbot` binding.
 3. Adapter calls sidecar `POST /accounts/:accountId/peers/:peerId/messages`.
 4. Sidecar sends text via iLink `sendmessage` with the stored `context_token`.
+5. If iLink send fails after a context exists, sidecar queues the outbound text
+   and flushes it after the next inbound peer message refreshes the context.
 
 The MVP adapter rejects attachments and empty text.
 

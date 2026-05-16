@@ -43,6 +43,15 @@ async function fetchJson(url: string, init?: RequestInit): Promise<{ status: num
   return { status: response.status, body: await response.json() };
 }
 
+async function waitFor(check: () => boolean, timeoutMs = 1000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.equal(check(), true);
+}
+
 test("sidecar accepts mock text events, exposes cursor updates, and sends replies", async () => {
   const stateFile = tempStateFile();
   const sidecar = await startSidecar({ stateFile });
@@ -215,6 +224,88 @@ test("sidecar iLink transport polls updates and sends through context token", as
     assert.equal(sent.body.ok, true);
     assert.ok(requests.some((request) => request.url.endsWith("/ilink/bot/getupdates")));
     assert.ok(requests.some((request) => request.url.endsWith("/ilink/bot/sendmessage")));
+  } finally {
+    delete process.env.ILINK_TOKEN;
+    await sidecar.stop();
+  }
+});
+
+test("sidecar queues failed iLink sends and flushes them on next peer activation", async () => {
+  const stateFile = tempStateFile();
+  const requests: Array<{ url: string; body: any }> = [];
+  let updateCount = 0;
+  let failNextSend = true;
+  let activationEnabled = false;
+  const ilinkFetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input);
+    const body = JSON.parse(String(init?.body ?? "{}"));
+    requests.push({ url, body });
+    if (url.endsWith("/ilink/bot/getupdates")) {
+      updateCount += 1;
+      if (updateCount === 1) {
+        return new Response(JSON.stringify({
+          get_updates_buf: "cursor-1",
+          msgs: [{
+            message_id: 1,
+            from_user_id: "wxid_boss",
+            context_token: "context-1",
+            item_list: [{ type: 1, text_item: { text: "hello" } }],
+          }],
+        }), { status: 200 });
+      }
+      if (activationEnabled) {
+        activationEnabled = false;
+        return new Response(JSON.stringify({
+          get_updates_buf: "cursor-2",
+          msgs: [{
+            message_id: 2,
+            from_user_id: "wxid_boss",
+            context_token: "context-2",
+            item_list: [{ type: 1, text_item: { text: "reactivate" } }],
+          }],
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ get_updates_buf: `cursor-${updateCount}`, msgs: [] }), { status: 200 });
+    }
+    if (url.endsWith("/ilink/bot/sendmessage") && failNextSend) {
+      failNextSend = false;
+      return new Response(JSON.stringify({ ok: false }), { status: 500 });
+    }
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+
+  process.env.ILINK_TOKEN = "test-bot-token";
+  const sidecar = await startSidecar({
+    stateFile,
+    transport: "ilink",
+    pollIntervalMs: 50,
+    requestTimeoutMs: 1000,
+    ilinkApiBaseUrl: "http://127.0.0.1:1",
+    ilinkAccounts: [{ accountId: "acct", botTokenEnv: "ILINK_TOKEN" }],
+  }, undefined, ilinkFetchImpl);
+
+  try {
+    await waitFor(() => {
+      const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+      return state.peers?.[0]?.context_token_ref === "context-1";
+    });
+
+    const failed = await fetchJson(`${sidecar.url()}/accounts/acct/peers/wxid_boss/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "queued reply" }),
+    });
+    assert.equal(failed.status, 502);
+    assert.equal(failed.body.error, "send-failed-queued");
+    assert.equal(JSON.parse(fs.readFileSync(stateFile, "utf8")).pending_outbox.length, 1);
+
+    activationEnabled = true;
+    await waitFor(() => {
+      const sent = requests.filter((request) => request.url.endsWith("/ilink/bot/sendmessage"));
+      return sent.some((request) => request.body.msg.context_token === "context-2" && request.body.msg.item_list[0].text_item.text === "queued reply");
+    });
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    assert.equal(state.pending_outbox.length, 0);
   } finally {
     delete process.env.ILINK_TOKEN;
     await sidecar.stop();

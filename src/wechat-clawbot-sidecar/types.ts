@@ -43,6 +43,8 @@ export interface WechatClawbotPeerState {
   updated_at: string;
   peer_name?: string;
   context_token_ref?: string;
+  context_expires_at?: string;
+  context_expiry_reminded_at?: string;
 }
 
 export interface StoredWechatClawbotSentMessage {
@@ -53,12 +55,24 @@ export interface StoredWechatClawbotSentMessage {
   created_at: string;
 }
 
+export interface WechatClawbotPendingOutboundMessage {
+  id: string;
+  account_id: string;
+  peer_id: string;
+  text: string;
+  reason: string;
+  created_at: string;
+  attempts: number;
+  last_error?: string;
+}
+
 export interface WechatClawbotSidecarState {
   version: 1;
   next_seq: number;
   events: StoredWechatClawbotEvent[];
   peers: WechatClawbotPeerState[];
   sent_messages: StoredWechatClawbotSentMessage[];
+  pending_outbox: WechatClawbotPendingOutboundMessage[];
   seen_keys: string[];
   account_cursors: Record<string, string>;
 }

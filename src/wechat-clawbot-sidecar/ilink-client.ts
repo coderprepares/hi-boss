@@ -21,6 +21,7 @@ function stringField(record: Record<string, unknown>, ...keys: string[]): string
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
   }
   return undefined;
 }
@@ -47,6 +48,11 @@ function normalizeBaseUrl(raw: string): string {
     throw new Error("Invalid iLink apiBaseUrl");
   }
   return url.toString().replace(/\/$/, "");
+}
+
+function randomWechatUin(): string {
+  const value = String(Math.floor(Math.random() * 0x100000000));
+  return Buffer.from(value).toString("base64");
 }
 
 function textFromItemList(raw: unknown): string | undefined {
@@ -123,13 +129,14 @@ export class WechatClawbotIlinkClient {
 
   async sendText(
     account: WechatClawbotIlinkAccountConfig,
+    peerId: string,
     contextToken: string,
     text: string
   ): Promise<void> {
     await this.post(account, "/ilink/bot/sendmessage", {
       msg: {
         from_user_id: "",
-        to_user_id: "",
+        to_user_id: peerId,
         client_id: `hiboss-wechat-clawbot:${Date.now()}-${Math.random().toString(16).slice(2)}`,
         message_type: 2,
         message_state: 2,
@@ -140,7 +147,7 @@ export class WechatClawbotIlinkClient {
         }],
       },
       base_info: {
-        channel_version: "1.0.2",
+        channel_version: "1.0.3",
       },
     });
   }
@@ -155,6 +162,7 @@ export class WechatClawbotIlinkClient {
       "Content-Type": "application/json",
       AuthorizationType: "ilink_bot_token",
       Authorization: `Bearer ${token}`,
+      "X-WECHAT-UIN": randomWechatUin(),
     });
     if (account.xWechatUin) headers.set("X-WECHAT-UIN", account.xWechatUin);
 
