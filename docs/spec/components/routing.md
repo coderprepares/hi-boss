@@ -147,8 +147,16 @@ or agent prompts.
      - `metadata = { platform, channelMessageId, author, chat }`
 4. `MessageRouter.routeEnvelope()` persists the envelope in SQLite (`status = pending`).
 5. If the envelope is due now (no `deliver-at`, or `deliver-at <= now`), the router calls `deliverEnvelope()`.
-6. For agent destinations, `deliverToAgent()` triggers the registered handler, which calls `AgentExecutor.checkAndRun(...)`.
-7. `AgentExecutor` loads pending envelopes from SQLite, marks them `done` immediately, and runs the agent (at-most-once).
+6. For agent destinations, `deliverToAgent()` triggers the registered handler.
+7. The daemon applies a short trailing debounce per agent before calling `AgentExecutor.checkAndRun(...)`.
+8. `AgentExecutor` loads pending envelopes from SQLite, marks them `done` immediately, and runs the agent (at-most-once).
+
+This debounce is shared by Telegram and WeChat ClawBot because both adapters
+produce ordinary channel envelopes before routing. A short burst such as two
+Telegram messages or two WeChat messages to the same speaker agent is therefore
+processed as one provider turn when the messages land inside the debounce
+window. The batching boundary is still the agent: different agents keep
+independent timers, and background jobs use the background executor path.
 
 If no binding exists:
 

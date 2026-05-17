@@ -50,6 +50,7 @@ import {
 import { parseStoredHttpIngressConfig } from "../http-bridge/config.js";
 import { HttpIngressBridge } from "../http-bridge/http-ingress-bridge.js";
 import { HTTP_INGRESS_CONFIG_KEY } from "../http-bridge/types.js";
+import { EnvelopeRunDebouncer } from "./envelope-run-debounce.js";
 
 // Re-export for CLI and external use
 export { isDaemonRunning, isSocketAcceptingConnections };
@@ -84,6 +85,7 @@ export class Daemon {
   private scheduler: EnvelopeScheduler;
   private cronScheduler: CronScheduler | null = null;
   private httpIngress: HttpIngressBridge | null = null;
+  private envelopeRunDebouncer = new EnvelopeRunDebouncer();
   private adapters: Map<string, ChatAdapter> = new Map(); // token -> adapter
   private createRunStatusReporter = ({ agent, envelopes }: { agent: Agent; envelopes: Envelope[] }) =>
     createTelegramRunStatusReporter({
@@ -308,21 +310,22 @@ export class Daemon {
 
   private registerSingleAgentHandler(agentName: string): void {
     this.router.registerAgentHandler(agentName, async (envelope) => {
-      const currentAgent = this.db.getAgentByName(agentName);
-      if (!currentAgent) {
-        logEvent("error", "agent-not-found", { "agent-name": agentName });
-        return;
-      }
-
-      // Non-blocking: trigger agent run
-      this.executor.checkAndRun(currentAgent, this.db, {
+      this.envelopeRunDebouncer.schedule(agentName, {
         kind: "envelope",
         source: getEnvelopeSourceFromEnvelope(envelope),
         envelopeId: envelope.id,
-      }).catch((err) => {
-        logEvent("error", "agent-check-and-run-failed", {
-          "agent-name": agentName,
-          error: errorMessage(err),
+      }, (task) => {
+        const currentAgent = this.db.getAgentByName(task.agentName);
+        if (!currentAgent) {
+          logEvent("error", "agent-not-found", { "agent-name": task.agentName });
+          return;
+        }
+
+        this.executor.checkAndRun(currentAgent, this.db, task.trigger).catch((err) => {
+          logEvent("error", "agent-check-and-run-failed", {
+            "agent-name": task.agentName,
+            error: errorMessage(err),
+          });
         });
       });
     });
@@ -404,6 +407,7 @@ export class Daemon {
 
     // Stop scheduler first (prevents new work while shutting down)
     this.scheduler.stop();
+    this.envelopeRunDebouncer.clear();
 
     await this.httpIngress?.stop();
     this.httpIngress = null;

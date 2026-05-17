@@ -146,13 +146,24 @@ Located in:
 Located in `src/agent/executor.ts`:
 
 1. **Trigger**: New envelope arrives, a scheduled envelope becomes due, or the daemon starts with pending work
-2. **Lock**: Per-agent queue lock acquired (no concurrent runs for same agent)
-3. **Session**: Get or create session (see [Session Management](session.md))
-4. **Turn Input**: Format pending envelopes into turn input
-5. **Execute**: Spawn provider CLI with turn input and system instructions
-6. **Auto-Ack**: Mark read envelopes as `done` immediately after they are loaded for a run (at-most-once)
-7. **Audit**: Record run in `agent_runs` table
-8. **Reschedule**: If more pending envelopes exist, schedule another turn via `setImmediate`
+2. **Debounce**: Immediate route-path envelopes addressed to normal agents wait for a short trailing debounce before execution
+3. **Lock**: Per-agent queue lock acquired (no concurrent runs for same agent)
+4. **Session**: Get or create session (see [Session Management](session.md))
+5. **Turn Input**: Format pending envelopes into turn input
+6. **Execute**: Spawn provider CLI with turn input and system instructions
+7. **Auto-Ack**: Mark read envelopes as `done` immediately after they are loaded for a run (at-most-once)
+8. **Audit**: Record run in `agent_runs` table
+9. **Reschedule**: If more pending envelopes exist, schedule another turn via `setImmediate`
+
+The debounce is implemented in `src/daemon/envelope-run-debounce.ts` and keyed by
+agent name. It is platform-neutral for immediate routing: Telegram, WeChat
+ClawBot, and HTTP ingress all persist normal envelopes first, then use the same
+agent trigger path. If multiple chat messages arrive within the debounce window,
+the later trigger replaces the earlier trigger, and the executor starts one
+provider turn that reads all due pending envelopes for that agent (up to the
+per-turn limit). Daemon startup pending-work scans and scheduler ticks
+intentionally bypass this debounce so restarts and due scheduled work resume
+immediately.
 
 Note: Applying a declarative setup config (`hiboss setup --config-file ...`) clears `agent_runs` as part of rebuilding setup-managed state.
 
@@ -160,6 +171,7 @@ Note: Applying a declarative setup config (`hiboss setup --config-file ...`) cle
 
 | Constant | Value | Description |
 |----------|-------|-------------|
+| `ENVELOPE_TRIGGER_DEBOUNCE_MS` | 500 | Trailing debounce before starting a normal agent run for newly due envelopes |
 | `MAX_ENVELOPES_PER_TURN` | 10 | Maximum envelopes processed per turn |
 
 ### Turn Input Format
