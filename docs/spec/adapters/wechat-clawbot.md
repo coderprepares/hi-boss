@@ -216,6 +216,20 @@ http://127.0.0.1:26322
 Do not include `apiToken`, `token`, iLink `bot_token`, QR codes, or
 `context_token` values in the adapter binding token.
 
+### Adapter Cursor Persistence
+
+The daemon persists the Hi-Boss adapter's `/updates` cursor in SQLite `config`
+under an internal key derived from the adapter type and a hash of the binding
+token. The raw binding token is not included in the key. On restart, the adapter
+resumes from the stored cursor so sidecar history is not replayed.
+
+When a binding has no stored cursor yet, the daemon advances the sidecar cursor
+to the current tail without dispatching existing events. This prevents old
+sidecar scaffold or iLink history from being treated as new inbound messages
+when WeChat is first bound. After that bootstrap, messages received while the
+daemon is down are delivered on the next start because the previous cursor is
+already stored.
+
 ## In-Repo Sidecar Scaffold
 
 Run the local file-backed scaffold without real WeChat credentials:

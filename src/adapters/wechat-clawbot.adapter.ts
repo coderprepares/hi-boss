@@ -20,6 +20,13 @@ import {
 export interface WechatClawbotAdapterOptions {
   fetchImpl?: FetchLike;
   env?: NodeJS.ProcessEnv;
+  cursorStore?: WechatClawbotCursorStore;
+  skipExistingEventsOnEmptyCursor?: boolean;
+}
+
+export interface WechatClawbotCursorStore {
+  load(): string | null | undefined;
+  save(cursor: string): void;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -53,11 +60,12 @@ export class WechatClawbotAdapter implements ChatAdapter {
   private handlers: ChannelMessageHandler[] = [];
   private commandHandlers: ChannelCommandHandler[] = [];
   private cursor: string | undefined;
+  private cursorInitialized = false;
   private stopped = true;
   private started = false;
   private loop: Promise<void> | undefined;
 
-  constructor(adapterToken: string, options: WechatClawbotAdapterOptions = {}) {
+  constructor(adapterToken: string, private options: WechatClawbotAdapterOptions = {}) {
     this.config = parseWechatClawbotAdapterToken(adapterToken);
     this.client = new WechatClawbotSidecarClient({
       config: this.config,
@@ -80,8 +88,11 @@ export class WechatClawbotAdapter implements ChatAdapter {
   }
 
   async pollOnce(): Promise<void> {
+    const bootstrappedToTail = await this.initializeCursor();
+    if (bootstrappedToTail) return;
+
     const result = await this.client.fetchUpdates(this.cursor);
-    this.cursor = result.nextCursor ?? this.cursor;
+    this.updateCursor(result.nextCursor);
 
     for (const event of result.events) {
       await this.dispatchEvent(event);
@@ -114,6 +125,43 @@ export class WechatClawbotAdapter implements ChatAdapter {
         await sleep(Math.max(250, this.config.pollIntervalMs));
       }
     }
+  }
+
+  private async initializeCursor(): Promise<boolean> {
+    if (this.cursorInitialized) return false;
+    this.cursorInitialized = true;
+
+    const stored = this.options.cursorStore?.load()?.trim();
+    if (stored) {
+      this.cursor = stored;
+      return false;
+    }
+
+    if (!this.options.skipExistingEventsOnEmptyCursor) {
+      return false;
+    }
+
+    await this.advanceCursorToTail();
+    return true;
+  }
+
+  private async advanceCursorToTail(): Promise<void> {
+    for (let page = 0; page < 100; page += 1) {
+      const result = await this.client.fetchUpdates(this.cursor);
+      const previous = this.cursor;
+      this.updateCursor(result.nextCursor);
+      if (result.events.length === 0 || !result.nextCursor || result.nextCursor === previous) {
+        return;
+      }
+    }
+    throw new Error("wechat-clawbot cursor bootstrap exceeded 100 update pages");
+  }
+
+  private updateCursor(cursor: string | undefined): void {
+    if (cursor === undefined) return;
+    if (cursor === this.cursor) return;
+    this.cursor = cursor;
+    this.options.cursorStore?.save(cursor);
   }
 
   private async dispatchEvent(event: WechatClawbotSidecarEvent): Promise<void> {

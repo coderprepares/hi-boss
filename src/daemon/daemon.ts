@@ -51,6 +51,7 @@ import { parseStoredHttpIngressConfig } from "../http-bridge/config.js";
 import { HttpIngressBridge } from "../http-bridge/http-ingress-bridge.js";
 import { HTTP_INGRESS_CONFIG_KEY } from "../http-bridge/types.js";
 import { EnvelopeRunDebouncer } from "./envelope-run-debounce.js";
+import { createAdapterCursorStore } from "./adapter-cursor-store.js";
 
 // Re-export for CLI and external use
 export { isDaemonRunning, isSocketAcceptingConnections };
@@ -377,7 +378,10 @@ export class Daemon {
         adapter = new TelegramAdapter(adapterToken);
         break;
       case "wechat-clawbot":
-        adapter = new WechatClawbotAdapter(adapterToken);
+        adapter = new WechatClawbotAdapter(adapterToken, {
+          cursorStore: createAdapterCursorStore(this.db, adapterType, adapterToken),
+          skipExistingEventsOnEmptyCursor: true,
+        });
         break;
       default:
         logEvent("error", "adapter-unknown-type", { "adapter-type": adapterType });

@@ -49,6 +49,110 @@ test("wechat-clawbot adapter maps sidecar text updates to ChannelMessage", async
   assert.equal(messages[0].content.text, "hello");
 });
 
+test("wechat-clawbot adapter skips existing sidecar events when no stored cursor exists", async () => {
+  const savedCursors: string[] = [];
+  const requests: string[] = [];
+  const fetchImpl = async (input: string | URL) => {
+    const url = String(input);
+    requests.push(url);
+    if (url === "http://sidecar.local/updates") {
+      return new Response(JSON.stringify({
+        events: [
+          {
+            event_id: "old-evt",
+            account_id: "acct",
+            peer_id: "wxid_boss",
+            text: "old",
+          },
+        ],
+        next_cursor: "1",
+      }), { status: 200 });
+    }
+    if (requests.length === 2) {
+      return new Response(JSON.stringify({
+        events: [],
+        next_cursor: "1",
+      }), { status: 200 });
+    }
+    return new Response(JSON.stringify({
+      events: [
+        {
+          event_id: "new-evt",
+          account_id: "acct",
+          peer_id: "wxid_boss",
+          text: "new",
+        },
+      ],
+      next_cursor: "2",
+    }), { status: 200 });
+  };
+
+  const adapter = new WechatClawbotAdapter(makeAdapterToken(), {
+    fetchImpl,
+    cursorStore: {
+      load: () => undefined,
+      save: (cursor) => savedCursors.push(cursor),
+    },
+    skipExistingEventsOnEmptyCursor: true,
+  });
+  const messages: ChannelMessage[] = [];
+  adapter.onMessage((message) => {
+    messages.push(message);
+  });
+
+  await adapter.pollOnce();
+  await adapter.pollOnce();
+
+  assert.deepEqual(requests, [
+    "http://sidecar.local/updates",
+    "http://sidecar.local/updates?cursor=1",
+    "http://sidecar.local/updates?cursor=1",
+  ]);
+  assert.deepEqual(savedCursors, ["1", "2"]);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].id, "new-evt");
+  assert.equal(messages[0].content.text, "new");
+});
+
+test("wechat-clawbot adapter resumes from stored cursor on first poll", async () => {
+  const savedCursors: string[] = [];
+  const requests: string[] = [];
+  const fetchImpl = async (input: string | URL) => {
+    requests.push(String(input));
+    return new Response(JSON.stringify({
+      events: [
+        {
+          event_id: "evt-after-restart",
+          account_id: "acct",
+          peer_id: "wxid_boss",
+          text: "after restart",
+        },
+      ],
+      next_cursor: "7",
+    }), { status: 200 });
+  };
+
+  const adapter = new WechatClawbotAdapter(makeAdapterToken(), {
+    fetchImpl,
+    cursorStore: {
+      load: () => "6",
+      save: (cursor) => savedCursors.push(cursor),
+    },
+    skipExistingEventsOnEmptyCursor: true,
+  });
+  const messages: ChannelMessage[] = [];
+  adapter.onMessage((message) => {
+    messages.push(message);
+  });
+
+  await adapter.pollOnce();
+
+  assert.deepEqual(requests, ["http://sidecar.local/updates?cursor=6"]);
+  assert.deepEqual(savedCursors, ["7"]);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].id, "evt-after-restart");
+});
+
 test("wechat-clawbot adapter sends text through sidecar peer endpoint", async () => {
   let capturedUrl = "";
   let capturedMethod = "";
