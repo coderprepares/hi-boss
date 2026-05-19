@@ -226,8 +226,13 @@ test("sidecar status records the most recent iLink poll error", async () => {
   try {
     await waitFor(async () => {
       const status = await fetchJson(`${sidecar.url()}/status`);
-      return status.body.ilink_poll.last_error === "iLink HTTP 500";
+      return status.body.ilink_poll.last_error === "iLink HTTP 500" &&
+        status.body.ilink_poll.consecutive_failures >= 1;
     });
+    const status = await fetchJson(`${sidecar.url()}/status`);
+    assert.equal(status.body.ilink_poll.in_flight, false);
+    assert.equal(typeof status.body.ilink_poll.last_duration_ms, "number");
+    assert.ok(status.body.ilink_poll.consecutive_failures >= 1);
   } finally {
     delete process.env.ILINK_TOKEN;
     await sidecar.stop();
@@ -265,10 +270,16 @@ test("sidecar iLink transport polls updates and sends through context token", as
   }, undefined, ilinkFetchImpl);
 
   try {
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await waitFor(async () => {
+      const status = await fetchJson(`${sidecar.url()}/status`);
+      return typeof status.body.ilink_poll.last_duration_ms === "number";
+    });
     const updates = await fetchJson(`${sidecar.url()}/updates`);
     assert.equal(updates.body.events.length, 1);
     assert.equal(updates.body.events[0].peer_id, "wxid_boss");
+    const status = await fetchJson(`${sidecar.url()}/status`);
+    assert.equal(status.body.ilink_poll.in_flight, false);
+    assert.equal(status.body.ilink_poll.consecutive_failures, 0);
 
     const sent = await fetchJson(`${sidecar.url()}/accounts/acct/peers/wxid_boss/messages`, {
       method: "POST",

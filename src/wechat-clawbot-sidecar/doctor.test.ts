@@ -103,8 +103,11 @@ function healthyFetch(nextCursor = "9"): FetchLike {
       },
       ilink_poll: {
         enabled: true,
+        in_flight: false,
         last_started_at: "2026-05-19T12:57:09.380Z",
         last_completed_at: "2026-05-19T12:57:07.379Z",
+        last_duration_ms: 123,
+        consecutive_failures: 0,
       },
     });
   };
@@ -141,8 +144,11 @@ test("wechat sidecar doctor reports ok for healthy status", async () => {
         },
         ilink_poll: {
           enabled: true,
+          in_flight: false,
           last_started_at: "2026-05-19T12:57:09.380Z",
           last_completed_at: "2026-05-19T12:57:07.379Z",
+          last_duration_ms: 123,
+          consecutive_failures: 0,
         },
       });
     },
@@ -159,6 +165,8 @@ test("wechat sidecar doctor reports ok for healthy status", async () => {
   assert.match(output, /pending-outbox: 0/);
   assert.match(output, /sent-messages: 3/);
   assert.match(output, /last-sent-at: 2026-05-19T13:28:45.000Z/);
+  assert.match(output, /ilink-poll-last-duration-ms: 123/);
+  assert.match(output, /ilink-poll-consecutive-failures: 0/);
   assert.match(output, /ilink-poll-last-completed-age-seconds: 2/);
 });
 

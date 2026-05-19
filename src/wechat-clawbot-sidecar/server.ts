@@ -86,9 +86,13 @@ export class WechatClawbotSidecarServer {
   private stopped = true;
   private startedAt = new Date().toISOString();
   private lastPollStartedAt?: string;
+  private currentPollStartedMs?: number;
   private lastPollCompletedAt?: string;
+  private lastPollDurationMs?: number;
   private lastPollErrorAt?: string;
   private lastPollError?: string;
+  private pollInFlight = false;
+  private pollConsecutiveFailures = 0;
 
   constructor(
     private config: WechatClawbotSidecarConfig,
@@ -159,10 +163,16 @@ export class WechatClawbotSidecarServer {
         state: this.store.getStatusSnapshot(),
         ilink_poll: {
           enabled: Boolean(this.ilink),
+          in_flight: this.pollInFlight,
+          current_duration_ms: this.pollInFlight && this.currentPollStartedMs !== undefined
+            ? Math.max(0, Date.now() - this.currentPollStartedMs)
+            : undefined,
           last_started_at: this.lastPollStartedAt,
           last_completed_at: this.lastPollCompletedAt,
+          last_duration_ms: this.lastPollDurationMs,
           last_error_at: this.lastPollErrorAt,
           last_error: this.lastPollError,
+          consecutive_failures: this.pollConsecutiveFailures,
         },
       });
       return;
@@ -217,17 +227,30 @@ export class WechatClawbotSidecarServer {
   private startPolling(): void {
     if (!this.ilink || this.stopped) return;
     this.pollTimer = setTimeout(async () => {
-      await this.pollIlinkOnce().catch((err) => {
+      const startedMs = Date.now();
+      this.pollInFlight = true;
+      this.currentPollStartedMs = startedMs;
+      this.lastPollStartedAt = new Date(startedMs).toISOString();
+      try {
+        await this.pollIlinkOnce();
+        this.lastPollDurationMs = Date.now() - startedMs;
+        this.lastPollCompletedAt = new Date().toISOString();
+        this.lastPollError = undefined;
+        this.pollConsecutiveFailures = 0;
+      } catch (err) {
+        this.lastPollDurationMs = Date.now() - startedMs;
         this.lastPollErrorAt = new Date().toISOString();
         this.lastPollError = safeStatusError(err);
-      });
+        this.pollConsecutiveFailures += 1;
+      } finally {
+        this.pollInFlight = false;
+      }
       this.startPolling();
     }, this.config.pollIntervalMs);
   }
 
   private async pollIlinkOnce(): Promise<void> {
     if (!this.ilink) return;
-    this.lastPollStartedAt = new Date().toISOString();
     for (const account of this.config.ilinkAccounts) {
       const cursor = this.store.getAccountCursor(account.accountId);
       const updates = await this.ilink.fetchUpdates(account, cursor);
@@ -245,8 +268,6 @@ export class WechatClawbotSidecarServer {
       this.store.setAccountCursor(account.accountId, updates.nextCursor);
     }
     await this.sendExpiryReminders().catch(() => undefined);
-    this.lastPollCompletedAt = new Date().toISOString();
-    this.lastPollError = undefined;
   }
 
   private async sendText(accountId: string, peerId: string, text: string) {

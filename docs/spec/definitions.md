@@ -365,13 +365,17 @@ Sidecar operations are documented in `docs/spec/adapters/wechat-clawbot-operatio
 - `context-expired:`
 - `next-context-expires-at:`
 - `ilink-poll-enabled:`
+- `ilink-poll-in-flight:`
+- `ilink-poll-current-duration-ms:`
 - `ilink-poll-last-started-at:`
 - `ilink-poll-last-started-age-seconds:`
 - `ilink-poll-last-completed-at:`
 - `ilink-poll-last-completed-age-seconds:`
 - `ilink-poll-max-age-seconds:`
+- `ilink-poll-last-duration-ms:`
 - `ilink-poll-last-error-at:`
 - `ilink-poll-last-error:`
+- `ilink-poll-consecutive-failures:`
 - `hiboss-dir:`
 - `hiboss-db-exists:`
 - `hiboss-daemon-pid-file-exists:`

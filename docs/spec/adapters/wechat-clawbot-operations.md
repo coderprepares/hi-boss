@@ -63,13 +63,17 @@ context-expiring-soon: 0
 context-expired: 0
 next-context-expires-at: 2026-05-20T08:05:43.455Z
 ilink-poll-enabled: true|false|(none)
+ilink-poll-in-flight: true|false|(none)
+ilink-poll-current-duration-ms: 0
 ilink-poll-last-started-at: 2026-05-19T12:57:09.380Z
 ilink-poll-last-started-age-seconds: 0
 ilink-poll-last-completed-at: 2026-05-19T12:57:07.379Z
 ilink-poll-last-completed-age-seconds: 2
 ilink-poll-max-age-seconds: 60
+ilink-poll-last-duration-ms: 123
 ilink-poll-last-error-at: (none)
 ilink-poll-last-error: (none)
+ilink-poll-consecutive-failures: 0
 hiboss-dir: /var/lib/hiboss
 hiboss-db-exists: true|false|(none)
 hiboss-daemon-pid-file-exists: true|false|(none)

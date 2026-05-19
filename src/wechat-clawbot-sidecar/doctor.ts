@@ -29,13 +29,17 @@ export interface WechatClawbotDoctorSummary {
   contextExpired?: number;
   nextContextExpiresAt?: string;
   ilinkPollEnabled?: boolean;
+  ilinkPollInFlight?: boolean;
+  ilinkPollCurrentDurationMs?: number;
   ilinkPollLastStartedAt?: string;
   ilinkPollLastStartedAgeSeconds?: number;
   ilinkPollLastCompletedAt?: string;
   ilinkPollLastCompletedAgeSeconds?: number;
   ilinkPollMaxAgeSeconds?: number;
+  ilinkPollLastDurationMs?: number;
   ilinkPollLastErrorAt?: string;
   ilinkPollLastError?: string;
+  ilinkPollConsecutiveFailures?: number;
   hibossDir?: string;
   hibossDbExists?: boolean;
   hibossDaemonPidFileExists?: boolean;
@@ -331,13 +335,17 @@ export async function runWechatClawbotDoctor(options: WechatClawbotDoctorOptions
 
   const ilinkPoll = objectRecord(statusBody?.ilink_poll);
   summary.ilinkPollEnabled = boolField(ilinkPoll, "enabled");
+  summary.ilinkPollInFlight = boolField(ilinkPoll, "in_flight");
+  summary.ilinkPollCurrentDurationMs = numberField(ilinkPoll, "current_duration_ms");
   summary.ilinkPollLastStartedAt = stringField(ilinkPoll, "last_started_at");
   summary.ilinkPollLastStartedAgeSeconds = ageSecondsSince(summary.ilinkPollLastStartedAt, nowMs);
   summary.ilinkPollLastCompletedAt = stringField(ilinkPoll, "last_completed_at");
   summary.ilinkPollLastCompletedAgeSeconds = ageSecondsSince(summary.ilinkPollLastCompletedAt, nowMs);
   summary.ilinkPollMaxAgeSeconds = Math.ceil(Math.max(options.config.pollIntervalMs * 10, 60_000) / 1000);
+  summary.ilinkPollLastDurationMs = numberField(ilinkPoll, "last_duration_ms");
   summary.ilinkPollLastErrorAt = stringField(ilinkPoll, "last_error_at");
   summary.ilinkPollLastError = stringField(ilinkPoll, "last_error");
+  summary.ilinkPollConsecutiveFailures = numberField(ilinkPoll, "consecutive_failures");
 
   if (summary.healthTransport && summary.transport && summary.healthTransport !== summary.transport) {
     addIssue(issues, "warning", "transport-mismatch", "healthz and status report different transports");
@@ -434,13 +442,17 @@ export function formatWechatClawbotDoctorResult(result: WechatClawbotDoctorResul
     `context-expired: ${valueOrNone(result.summary.contextExpired)}`,
     `next-context-expires-at: ${valueOrNone(result.summary.nextContextExpiresAt)}`,
     `ilink-poll-enabled: ${valueOrNone(result.summary.ilinkPollEnabled)}`,
+    `ilink-poll-in-flight: ${valueOrNone(result.summary.ilinkPollInFlight)}`,
+    `ilink-poll-current-duration-ms: ${valueOrNone(result.summary.ilinkPollCurrentDurationMs)}`,
     `ilink-poll-last-started-at: ${valueOrNone(result.summary.ilinkPollLastStartedAt)}`,
     `ilink-poll-last-started-age-seconds: ${valueOrNone(result.summary.ilinkPollLastStartedAgeSeconds)}`,
     `ilink-poll-last-completed-at: ${valueOrNone(result.summary.ilinkPollLastCompletedAt)}`,
     `ilink-poll-last-completed-age-seconds: ${valueOrNone(result.summary.ilinkPollLastCompletedAgeSeconds)}`,
     `ilink-poll-max-age-seconds: ${valueOrNone(result.summary.ilinkPollMaxAgeSeconds)}`,
+    `ilink-poll-last-duration-ms: ${valueOrNone(result.summary.ilinkPollLastDurationMs)}`,
     `ilink-poll-last-error-at: ${valueOrNone(result.summary.ilinkPollLastErrorAt)}`,
     `ilink-poll-last-error: ${valueOrNone(result.summary.ilinkPollLastError)}`,
+    `ilink-poll-consecutive-failures: ${valueOrNone(result.summary.ilinkPollConsecutiveFailures)}`,
     `hiboss-dir: ${valueOrNone(result.summary.hibossDir)}`,
     `hiboss-db-exists: ${valueOrNone(result.summary.hibossDbExists)}`,
     `hiboss-daemon-pid-file-exists: ${valueOrNone(result.summary.hibossDaemonPidFileExists)}`,
