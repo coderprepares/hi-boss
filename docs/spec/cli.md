@@ -47,6 +47,7 @@ Default permission levels below come from the built-in permission policy (`DEFAU
 | `hiboss agent abort` | Cancel current run + clear pending inbox | Yes (boss token) | boss |
 | `hiboss agent delete` | Delete an agent | Yes (boss-privileged token) | boss |
 | `hiboss-wechat-clawbot-sidecar doctor` | Probe local WeChat sidecar status/outbox counters and optional Hi-Boss daemon/DB state without secrets | No | n/a |
+| `hiboss-wechat-clawbot-sidecar monitor` | Run one-shot WeChat doctor monitoring and notify on issues without inline secrets | No | n/a |
 
 Note: `hiboss daemon start` prints startup failure guidance directly in CLI when available (for example missing-role remediation), and also writes details to `daemon.log`.
 

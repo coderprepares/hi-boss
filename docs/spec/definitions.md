@@ -387,6 +387,27 @@ Sidecar operations are documented in `docs/spec/adapters/wechat-clawbot-operatio
 - `issue-N-name:`
 - `issue-N-message:`
 
+`hiboss-wechat-clawbot-sidecar monitor` prints:
+- `ok:`
+- `monitor-status:` (`ok|alert|suppressed|notify-error`)
+- `doctor-status:` (`ok|warn|error`)
+- `notified:`
+- `dry-run:`
+- `cooldown-active:`
+- `cooldown-file:`
+- `cooldown-until:`
+- `envelope-id:` (short id when a notification envelope was created)
+- `notification-error:`
+- `pending-outbox:`
+- `sent-messages:`
+- `last-sent-at:`
+- `hiboss-cursor-matches-sidecar:`
+- `hiboss-recent-wechat-poll-failures:`
+- `issue-count:`
+- `issue-N-level:`
+- `issue-N-name:`
+- `issue-N-message:`
+
 ---
 
 ## TypeScript Interfaces

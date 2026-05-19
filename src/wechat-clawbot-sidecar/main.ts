@@ -10,18 +10,25 @@ import {
   runWechatClawbotDoctor,
 } from "./doctor.js";
 import { runWechatClawbotLogin } from "./login.js";
+import {
+  formatWechatClawbotMonitorResult,
+  parseWechatClawbotMonitorCliArgs,
+  runWechatClawbotMonitor,
+} from "./monitor.js";
 import { WechatClawbotSidecarServer } from "./server.js";
 
 function printUsage(): void {
   console.log(`Usage:
   hiboss-wechat-clawbot-sidecar [--config ./sidecar.json]
   hiboss-wechat-clawbot-sidecar doctor [--config ./sidecar.json] [--hiboss-dir /var/lib/hiboss] [--agent nex]
+  hiboss-wechat-clawbot-sidecar monitor [--config ./sidecar.json] [--hiboss-dir /var/lib/hiboss] [--agent nex] [--notify-to channel:telegram:...]
   hiboss-wechat-clawbot-sidecar login [--config ./sidecar.json]
   hiboss-wechat-clawbot-sidecar login-help
 
 Source checkout equivalent:
   npm run wechat-clawbot-sidecar -- [--config ./sidecar.json]
   npm run wechat-clawbot-sidecar -- doctor [--config ./sidecar.json] [--hiboss-dir /var/lib/hiboss] [--agent nex]
+  npm run wechat-clawbot-sidecar -- monitor [--config ./sidecar.json] [--hiboss-dir /var/lib/hiboss] [--agent nex] [--notify-to channel:telegram:...]
   npm run wechat-clawbot-sidecar -- login [--config ./sidecar.json]
   npm run wechat-clawbot-sidecar -- login-help
 
@@ -84,6 +91,10 @@ Include local Hi-Boss daemon and SQLite binding checks:
 
   hiboss-wechat-clawbot-sidecar doctor --config /root/hiboss/adapters/wechat-clawbot/sidecar.json --hiboss-dir /var/lib/hiboss --agent nex
 
+Run a one-shot monitor check and notify only when doctor reports issues:
+
+  hiboss-wechat-clawbot-sidecar monitor --config /root/hiboss/adapters/wechat-clawbot/sidecar.json --hiboss-dir /var/lib/hiboss --agent nex --notify-to channel:telegram:<chat-id>
+
 Do not send bot tokens, QR data, context tokens, or state files through chat.
 `);
 }
@@ -111,6 +122,17 @@ async function main(): Promise<void> {
     });
     console.log(formatWechatClawbotDoctorResult(result));
     if (result.status === "error") process.exitCode = 1;
+    return;
+  }
+  if (args.includes("monitor")) {
+    const commandIndex = args.indexOf("monitor");
+    const commandArgs = args.slice(0, commandIndex).concat(args.slice(commandIndex + 1));
+    const { configPath, overrides } = parseSidecarCliArgs(commandArgs);
+    const monitorOptions = parseWechatClawbotMonitorCliArgs(overrides);
+    const config = loadWechatClawbotSidecarConfig(configPath);
+    const result = await runWechatClawbotMonitor({ config, ...monitorOptions });
+    console.log(formatWechatClawbotMonitorResult(result));
+    if (result.monitorStatus === "notify-error" || result.doctor.status === "error") process.exitCode = 1;
     return;
   }
   if (args.includes("login")) {

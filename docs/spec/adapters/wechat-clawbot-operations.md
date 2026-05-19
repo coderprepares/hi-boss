@@ -101,6 +101,53 @@ the most recent iLink poll error. With `--hiboss-dir`, warnings also include a
 missing daemon PID/socket, missing boss id, missing `wechat-clawbot` binding for
 the named agent, absent persisted cursor, or cursor mismatch.
 
+## Monitor Command
+
+The monitor command is a one-shot wrapper around doctor for cron or systemd
+timer use. It runs the same checks and sends a notification only when doctor
+reports one or more issues:
+
+```bash
+hiboss-wechat-clawbot-sidecar monitor \
+  --config /root/hiboss/adapters/wechat-clawbot/sidecar.json \
+  --hiboss-dir /var/lib/hiboss \
+  --agent nex \
+  --notify-to channel:telegram:<chat-id>
+```
+
+Notification tokens are never accepted inline. The monitor resolves the token
+from `--notify-token-env`, `--notify-token-file`, or the local SQLite token for
+`--notify-agent` / `--agent` when `--hiboss-dir` is present. It must not print
+token values, message text from WeChat, context tokens, token file paths, state
+file paths, adapter tokens, or channel identifiers beyond the notification
+envelope short id.
+
+By default, repeated notifications with the same issue fingerprint are
+suppressed for one hour. Override with `--cooldown-ms <ms>` or set
+`--cooldown-file <path>` to control the state location. Use `--dry-run` to test
+alert rendering without sending.
+
+Monitor output is parseable key/value text:
+
+```text
+ok: true|false
+monitor-status: ok|alert|suppressed|notify-error
+doctor-status: ok|warn|error
+notified: true|false
+dry-run: true|false
+cooldown-active: true|false
+cooldown-file: /var/lib/hiboss/.daemon/wechat-clawbot-monitor.cooldown.json
+cooldown-until: 2026-05-19T14:38:54.551Z
+envelope-id: 12345678
+notification-error: (none)
+pending-outbox: 0
+sent-messages: 25
+last-sent-at: 2026-05-19T13:38:54.551Z
+hiboss-cursor-matches-sidecar: true
+hiboss-recent-wechat-poll-failures: 0
+issue-count: 0
+```
+
 ## Production Checks
 
 After deploying sidecar code:
@@ -110,6 +157,8 @@ After deploying sidecar code:
 4. Send one real channel message through `hiboss envelope send` when the reply
    context is active, then confirm `pending-outbox: 0` and `sent-messages:`
    increments in doctor output.
+5. For monitoring, schedule the one-shot monitor command outside the daemon,
+   preferably to a Telegram channel so WeChat failures can still be reported.
 
 For the current PM2-style deployment, restart the sidecar process with:
 
