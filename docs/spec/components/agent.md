@@ -328,7 +328,7 @@ Note: `hiboss setup --config-file` (apply) clears `agent_runs`, so this audit tr
 
 ### Cancellation
 
-An agent run can be cancelled by the boss (for example via Telegram `/abort` or `hiboss agent abort`).
+An agent run can be cancelled by the boss (for example via Telegram `/abort [agent-name]` or `hiboss agent abort`).
 
 Semantics:
 - A cancelled run is terminal and is recorded as `status = cancelled`.

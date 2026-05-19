@@ -64,7 +64,7 @@ function buildChannelHelpText(platform: string | undefined): string {
     "/help - show this help",
     "/new [agent-name] - request a fresh session",
     "/status [agent-name] - show agent status",
-    "/abort - cancel current run and clear due pending inbox",
+    "/abort [agent-name] - cancel current run and clear due pending inbox",
   ];
   if (platform === "telegram") {
     lines.push("/verbose - show verbose mode");
@@ -122,11 +122,21 @@ export function createChannelCommandHandler(params: {
     }
 
     if (c.command === "abort" && typeof c.agentName === "string" && c.agentName) {
-      const cancelledRun = params.executor.abortCurrentRun(c.agentName, commandReason(c));
-      const clearedPendingCount = params.db.markDuePendingNonCronEnvelopesDoneForAgent(c.agentName);
+      const target = resolveTargetAgentName(c);
+      if ("error" in target) {
+        return { text: target.error };
+      }
+
+      const agent = params.db.getAgentByNameCaseInsensitive(target.agentName);
+      if (!agent) {
+        return { text: "error: Agent not found" };
+      }
+
+      const cancelledRun = params.executor.abortCurrentRun(agent.name, commandReason(c));
+      const clearedPendingCount = params.db.markDuePendingNonCronEnvelopesDoneForAgent(agent.name);
       const lines = [
         "abort: ok",
-        `agent-name: ${c.agentName}`,
+        `agent-name: ${agent.name}`,
         `cancelled-run: ${cancelledRun ? "true" : "false"}`,
         `cleared-pending-count: ${clearedPendingCount}`,
       ];

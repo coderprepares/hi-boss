@@ -38,6 +38,7 @@ Telegram chat commands are boss-only (non-boss users get no reply):
 - `/status` — show `hiboss agent status` for the bound agent, including live background delegation counts
 - `/status <agent-name>` — show `hiboss agent status` for a named agent
 - `/abort` — cancel current run + clear **due** pending inbox for the bound agent
+- `/abort <agent-name>` — cancel current run + clear **due** pending inbox for a named agent
 - `/help` — show supported chat commands
 - `/verbose` — show current verbose state for this chat
 - `/verbose on` — enable runtime status updates for this chat

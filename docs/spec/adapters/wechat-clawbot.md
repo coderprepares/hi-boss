@@ -484,7 +484,7 @@ commands from the sidecar:
 - `/new <agent-name>`
 - `/status`
 - `/status <agent-name>`
-- `/abort`
+- `/abort [agent-name]`
 - `/help`
 Commands are handled as boss-only by `ChannelBridge`.
 
