@@ -393,13 +393,15 @@ Sidecar operations are documented in `docs/spec/adapters/wechat-clawbot-operatio
 `hiboss-wechat-clawbot-sidecar monitor` prints:
 - `ok:`
 - `run-at:`
-- `monitor-status:` (`ok|alert|suppressed|notify-error`)
+- `monitor-status:` (`ok|grace|alert|suppressed|notify-error`)
 - `doctor-status:` (`ok|warn|error`)
 - `notified:`
 - `dry-run:`
 - `cooldown-active:`
+- `grace-active:`
 - `cooldown-file:`
 - `cooldown-until:`
+- `grace-until:`
 - `envelope-id:` (short id when a notification envelope was created)
 - `notification-error:`
 - `pending-outbox:`
@@ -425,7 +427,7 @@ Sidecar operations are documented in `docs/spec/adapters/wechat-clawbot-operatio
 - `last-run-at:`
 - `last-run-fresh:`
 - `last-run-age-seconds:`
-- `last-monitor-status:` (`ok|alert|suppressed|notify-error`, or `(none)`)
+- `last-monitor-status:` (`ok|grace|alert|suppressed|notify-error`, or `(none)`)
 - `last-doctor-status:` (`ok|warn|error`, or `(none)`)
 - `last-notified:`
 - `last-issue-count:`

@@ -21,19 +21,22 @@ export interface WechatClawbotMonitorCliOptions {
   notifyTokenFile?: string;
   cooldownFile?: string;
   cooldownMs?: number;
+  alertGraceMs?: number;
   dryRun?: boolean;
 }
 
 export interface WechatClawbotMonitorResult {
   ok: boolean;
   runAt: string;
-  monitorStatus: "ok" | "alert" | "suppressed" | "notify-error";
+  monitorStatus: "ok" | "grace" | "alert" | "suppressed" | "notify-error";
   doctor: WechatClawbotDoctorResult;
   notified: boolean;
   dryRun: boolean;
   cooldownActive: boolean;
+  graceActive: boolean;
   cooldownFile?: string;
   cooldownUntil?: string;
+  graceUntil?: string;
   envelopeId?: string;
   notificationError?: string;
 }
@@ -76,10 +79,12 @@ export interface WechatClawbotMonitorStatusOptions extends WechatClawbotMonitorS
 
 interface CooldownState {
   fingerprint?: string;
+  firstSeenAt?: number;
   notifiedAt?: number;
 }
 
 const DEFAULT_COOLDOWN_MS = 60 * 60 * 1000;
+const DEFAULT_ALERT_GRACE_MS = 2 * 60 * 1000;
 const DEFAULT_CRON_FILE = "/etc/cron.d/hiboss-wechat-clawbot-monitor";
 const DEFAULT_LOG_FILE = "/var/log/hiboss-wechat-clawbot-monitor.log";
 const DEFAULT_MONITOR_STATUS_MAX_AGE_MINUTES = 15;
@@ -221,6 +226,7 @@ export async function runWechatClawbotMonitor(options: WechatClawbotMonitorOptio
   const nowMs = options.nowMs ?? Date.now();
   const runAt = new Date(nowMs).toISOString();
   const cooldownMs = options.cooldownMs ?? DEFAULT_COOLDOWN_MS;
+  const alertGraceMs = options.alertGraceMs ?? DEFAULT_ALERT_GRACE_MS;
   const cooldownFile = options.cooldownFile ?? defaultCooldownFile(options.hibossDir);
   const fingerprint = alert ? alertFingerprint(doctor) : undefined;
   const cooldown = readCooldown(cooldownFile);
@@ -234,7 +240,8 @@ export async function runWechatClawbotMonitor(options: WechatClawbotMonitorOptio
   );
 
   if (!alert) {
-    return { ok: true, runAt, monitorStatus: "ok", doctor, notified: false, dryRun: Boolean(options.dryRun), cooldownActive: false, cooldownFile };
+    if (cooldown?.firstSeenAt !== undefined) writeCooldown(cooldownFile, { fingerprint: cooldown.fingerprint, notifiedAt: cooldown.notifiedAt });
+    return { ok: true, runAt, monitorStatus: "ok", doctor, notified: false, dryRun: Boolean(options.dryRun), cooldownActive: false, graceActive: false, cooldownFile };
   }
 
   const cooldownUntil = cooldownActive && lastNotifiedAt !== undefined
@@ -249,13 +256,37 @@ export async function runWechatClawbotMonitor(options: WechatClawbotMonitorOptio
       notified: false,
       dryRun: Boolean(options.dryRun),
       cooldownActive,
+      graceActive: false,
       cooldownFile,
       cooldownUntil,
     };
   }
 
   if (options.dryRun || !options.notifyTo) {
-    return { ok: false, runAt, monitorStatus: "alert", doctor, notified: false, dryRun: Boolean(options.dryRun), cooldownActive, cooldownFile };
+    return { ok: false, runAt, monitorStatus: "alert", doctor, notified: false, dryRun: Boolean(options.dryRun), cooldownActive, graceActive: false, cooldownFile };
+  }
+
+  const sameFingerprint = cooldown?.fingerprint === fingerprint;
+  const firstSeenAt = sameFingerprint && typeof cooldown?.firstSeenAt === "number"
+    ? cooldown.firstSeenAt
+    : nowMs;
+  const graceActive = alertGraceMs > 0 && nowMs - firstSeenAt < alertGraceMs;
+  if (graceActive) {
+    const nextCooldown: CooldownState = { fingerprint, firstSeenAt };
+    if (sameFingerprint && cooldown?.notifiedAt !== undefined) nextCooldown.notifiedAt = cooldown.notifiedAt;
+    writeCooldown(cooldownFile, nextCooldown);
+    return {
+      ok: false,
+      runAt,
+      monitorStatus: "grace",
+      doctor,
+      notified: false,
+      dryRun: false,
+      cooldownActive: false,
+      graceActive: true,
+      cooldownFile,
+      graceUntil: new Date(firstSeenAt + alertGraceMs).toISOString(),
+    };
   }
 
   try {
@@ -272,6 +303,7 @@ export async function runWechatClawbotMonitor(options: WechatClawbotMonitorOptio
       notified: true,
       dryRun: false,
       cooldownActive,
+      graceActive: false,
       cooldownFile,
       envelopeId: sent.id ? formatShortId(sent.id) : undefined,
     };
@@ -284,6 +316,7 @@ export async function runWechatClawbotMonitor(options: WechatClawbotMonitorOptio
       notified: false,
       dryRun: false,
       cooldownActive,
+      graceActive: false,
       cooldownFile,
       notificationError: err instanceof Error ? err.message : String(err),
     };
@@ -299,8 +332,10 @@ export function formatWechatClawbotMonitorResult(result: WechatClawbotMonitorRes
     `notified: ${result.notified ? "true" : "false"}`,
     `dry-run: ${result.dryRun ? "true" : "false"}`,
     `cooldown-active: ${result.cooldownActive ? "true" : "false"}`,
+    `grace-active: ${result.graceActive ? "true" : "false"}`,
     `cooldown-file: ${valueOrNone(result.cooldownFile)}`,
     `cooldown-until: ${valueOrNone(result.cooldownUntil)}`,
+    `grace-until: ${valueOrNone(result.graceUntil)}`,
     `envelope-id: ${valueOrNone(result.envelopeId)}`,
     `notification-error: ${valueOrNone(result.notificationError)}`,
     `pending-outbox: ${valueOrNone(result.doctor.summary.pendingOutbox)}`,
@@ -346,6 +381,8 @@ export function parseWechatClawbotMonitorCliArgs(args: string[]): WechatClawbotM
       if (!result.cooldownFile) throw new Error("--cooldown-file requires a value");
     } else if (arg === "--cooldown-ms") {
       result.cooldownMs = parseNonNegativeInt(args[++index], "--cooldown-ms");
+    } else if (arg === "--alert-grace-ms") {
+      result.alertGraceMs = parseNonNegativeInt(args[++index], "--alert-grace-ms");
     } else if (arg === "--dry-run") {
       result.dryRun = true;
     } else {

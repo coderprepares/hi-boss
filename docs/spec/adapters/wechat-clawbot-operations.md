@@ -132,6 +132,11 @@ suppressed for one hour. Override with `--cooldown-ms <ms>` or set
 `--cooldown-file <path>` to control the state location. Use `--dry-run` to test
 alert rendering without sending.
 
+By default, the first observed alert for a fingerprint is held for 120 seconds
+before sending. This avoids noisy notifications during short deploy/restart
+windows. Override with `--alert-grace-ms <ms>`; use `0` to disable the grace
+period.
+
 Install or repair the cron-based monitor with the repo script:
 
 ```bash
@@ -140,7 +145,8 @@ scripts/install-wechat-clawbot-monitor.sh \
   --hiboss-dir /var/lib/hiboss \
   --agent nex \
   --notify-to channel:telegram:<chat-id> \
-  --interval-minutes 5
+  --interval-minutes 5 \
+  --alert-grace-ms 120000
 ```
 
 Monitor output is parseable key/value text:
@@ -148,13 +154,15 @@ Monitor output is parseable key/value text:
 ```text
 ok: true|false
 run-at: 2026-05-19T14:38:54.551Z
-monitor-status: ok|alert|suppressed|notify-error
+monitor-status: ok|grace|alert|suppressed|notify-error
 doctor-status: ok|warn|error
 notified: true|false
 dry-run: true|false
 cooldown-active: true|false
+grace-active: true|false
 cooldown-file: /var/lib/hiboss/.daemon/wechat-clawbot-monitor.cooldown.json
 cooldown-until: 2026-05-19T14:38:54.551Z
+grace-until: 2026-05-19T14:40:54.551Z
 envelope-id: 12345678
 notification-error: (none)
 pending-outbox: 0
@@ -190,7 +198,7 @@ log-file-exists: true|false
 last-run-at: 2026-05-19T14:00:00.000Z
 last-run-fresh: true|false|(none)
 last-run-age-seconds: 300
-last-monitor-status: ok|alert|suppressed|notify-error|(none)
+last-monitor-status: ok|grace|alert|suppressed|notify-error|(none)
 last-doctor-status: ok|warn|error|(none)
 last-notified: true|false|(none)
 last-issue-count: 0

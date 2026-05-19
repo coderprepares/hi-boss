@@ -96,6 +96,7 @@ test("wechat sidecar monitor sends notification when doctor has issues", async (
     nowMs: Date.parse("2026-05-19T12:57:11.000Z"),
     notifyTo: "channel:telegram:123",
     notifyTokenEnv: "HIBOSS_MONITOR_TOKEN",
+    alertGraceMs: 0,
     notifyImpl: async ({ token, to, text }) => {
       assert.equal(token, "agent-token");
       assert.equal(to, "channel:telegram:123");
@@ -128,6 +129,7 @@ test("wechat sidecar monitor suppresses repeated alerts during cooldown", async 
     notifyTokenEnv: "HIBOSS_MONITOR_TOKEN",
     cooldownFile,
     cooldownMs: 10_000,
+    alertGraceMs: 0,
     nowMs: 1_700_000_000_000,
     notifyImpl,
   });
@@ -138,6 +140,7 @@ test("wechat sidecar monitor suppresses repeated alerts during cooldown", async 
     notifyTokenEnv: "HIBOSS_MONITOR_TOKEN",
     cooldownFile,
     cooldownMs: 10_000,
+    alertGraceMs: 0,
     nowMs: 1_700_000_001_000,
     notifyImpl,
   });
@@ -145,6 +148,46 @@ test("wechat sidecar monitor suppresses repeated alerts during cooldown", async 
   assert.equal(first.monitorStatus, "alert");
   assert.equal(second.monitorStatus, "suppressed");
   assert.equal(second.cooldownActive, true);
+  assert.equal(notifyCount, 1);
+  delete process.env.HIBOSS_MONITOR_TOKEN;
+});
+
+test("wechat sidecar monitor delays first notification during alert grace", async (t) => {
+  process.env.HIBOSS_MONITOR_TOKEN = "agent-token";
+  const cooldownFile = tempFile(t);
+  let notifyCount = 0;
+  const notifyImpl = async () => {
+    notifyCount += 1;
+    return { id: "12345678-1234-4234-8234-123456789abc" };
+  };
+
+  const first = await runWechatClawbotMonitor({
+    config: baseConfig,
+    fetchImpl: fetchWithPendingOutbox(2),
+    notifyTo: "channel:telegram:123",
+    notifyTokenEnv: "HIBOSS_MONITOR_TOKEN",
+    cooldownFile,
+    alertGraceMs: 120_000,
+    nowMs: 1_700_000_000_000,
+    notifyImpl,
+  });
+  const second = await runWechatClawbotMonitor({
+    config: baseConfig,
+    fetchImpl: fetchWithPendingOutbox(2),
+    notifyTo: "channel:telegram:123",
+    notifyTokenEnv: "HIBOSS_MONITOR_TOKEN",
+    cooldownFile,
+    alertGraceMs: 120_000,
+    nowMs: 1_700_000_121_000,
+    notifyImpl,
+  });
+
+  assert.equal(first.monitorStatus, "grace");
+  assert.equal(first.graceActive, true);
+  assert.equal(first.notified, false);
+  assert.match(formatWechatClawbotMonitorResult(first), /grace-active: true/);
+  assert.equal(second.monitorStatus, "alert");
+  assert.equal(second.notified, true);
   assert.equal(notifyCount, 1);
   delete process.env.HIBOSS_MONITOR_TOKEN;
 });
@@ -159,12 +202,15 @@ test("wechat sidecar monitor parses notification flags", () => {
     "channel:telegram:123",
     "--cooldown-ms",
     "60000",
+    "--alert-grace-ms",
+    "120000",
     "--dry-run",
   ]), {
     hibossDir: "/var/lib/hiboss",
     agentName: "nex",
     notifyTo: "channel:telegram:123",
     cooldownMs: 60000,
+    alertGraceMs: 120000,
     dryRun: true,
   });
 });
