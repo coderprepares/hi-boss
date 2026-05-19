@@ -4,17 +4,23 @@ import {
   parseSidecarCliArgs,
   resolveWechatClawbotSidecarApiToken,
 } from "./config.js";
+import {
+  formatWechatClawbotDoctorResult,
+  runWechatClawbotDoctor,
+} from "./doctor.js";
 import { runWechatClawbotLogin } from "./login.js";
 import { WechatClawbotSidecarServer } from "./server.js";
 
 function printUsage(): void {
   console.log(`Usage:
   hiboss-wechat-clawbot-sidecar [--config ./sidecar.json]
+  hiboss-wechat-clawbot-sidecar doctor [--config ./sidecar.json]
   hiboss-wechat-clawbot-sidecar login [--config ./sidecar.json]
   hiboss-wechat-clawbot-sidecar login-help
 
 Source checkout equivalent:
   npm run wechat-clawbot-sidecar -- [--config ./sidecar.json]
+  npm run wechat-clawbot-sidecar -- doctor [--config ./sidecar.json]
   npm run wechat-clawbot-sidecar -- login [--config ./sidecar.json]
   npm run wechat-clawbot-sidecar -- login-help
 
@@ -69,6 +75,10 @@ Check local status without exposing message text, bot tokens, or context tokens:
 
   curl -fsS http://127.0.0.1:26322/status
 
+Run the local no-secret doctor check:
+
+  hiboss-wechat-clawbot-sidecar doctor --config /root/hiboss/adapters/wechat-clawbot/sidecar.json
+
 Do not send bot tokens, QR data, context tokens, or state files through chat.
 `);
 }
@@ -81,6 +91,17 @@ async function main(): Promise<void> {
   }
   if (args.includes("login-help")) {
     printLoginHelp();
+    return;
+  }
+  if (args.includes("doctor")) {
+    const { configPath, overrides } = parseSidecarCliArgs(args.filter((arg) => arg !== "doctor"));
+    if (overrides.length > 0) {
+      throw new Error(`Unknown arguments: ${overrides.join(" ")}`);
+    }
+    const config = loadWechatClawbotSidecarConfig(configPath);
+    const result = await runWechatClawbotDoctor({ config });
+    console.log(formatWechatClawbotDoctorResult(result));
+    if (result.status === "error") process.exitCode = 1;
     return;
   }
   if (args.includes("login")) {

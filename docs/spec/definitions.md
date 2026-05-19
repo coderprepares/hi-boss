@@ -339,6 +339,41 @@ Command flags:
 
 ---
 
+## WeChat ClawBot Sidecar
+
+Sidecar operations are documented in `docs/spec/adapters/wechat-clawbot-operations.md`.
+
+### CLI Output Keys
+
+`hiboss-wechat-clawbot-sidecar doctor` prints:
+- `ok:`
+- `status:`
+- `sidecar-url:`
+- `health-ok:`
+- `health-transport:`
+- `status-ok:`
+- `transport:`
+- `accounts:`
+- `peers:`
+- `events:`
+- `next-cursor:`
+- `pending-outbox:`
+- `context-active:`
+- `context-expiring-soon:`
+- `context-expired:`
+- `next-context-expires-at:`
+- `ilink-poll-enabled:`
+- `ilink-poll-last-started-at:`
+- `ilink-poll-last-completed-at:`
+- `ilink-poll-last-error-at:`
+- `ilink-poll-last-error:`
+- `issue-count:`
+- `issue-N-level:`
+- `issue-N-name:`
+- `issue-N-message:`
+
+---
+
 ## TypeScript Interfaces
 
 The current shapes live in:

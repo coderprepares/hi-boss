@@ -41,6 +41,7 @@ Adapters:
 - `docs/spec/adapters/telegram.md` — Telegram adapter behavior and message schema
 - `docs/spec/adapters/wechat-clawbot.md` — WeChat ClawBot sidecar adapter behavior and message schema
 - `docs/spec/adapters/wechat-clawbot-execution.md` — WeChat ClawBot multi-account execution model
+- `docs/spec/adapters/wechat-clawbot-operations.md` — WeChat ClawBot sidecar deployment and doctor checks
 
 Providers (canonical behavior):
 - `docs/spec/provider-clis.md` — provider CLI invocation and token usage semantics
