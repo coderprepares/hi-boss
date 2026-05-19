@@ -78,6 +78,36 @@ test("channel /new reason uses command platform when provided", async () => {
   assert.deepEqual(requested, [{ agentName: "nex", reason: "wechat-clawbot:/new" }]);
 });
 
+test("channel /help reports commands for the current platform", async () => {
+  const handler = createChannelCommandHandler({
+    db: {} as any,
+    executor: {} as any,
+    backgroundExecutor: {} as any,
+  });
+
+  const wechat = await handler({
+    platform: "wechat-clawbot",
+    command: "help",
+    args: "",
+    chatId: "acct/wxid_boss",
+    authorId: "wxid_boss",
+    agentName: "nex",
+  } as any);
+  const telegram = await handler({
+    platform: "telegram",
+    command: "help",
+    args: "",
+    chatId: "1",
+    authorUsername: "boss",
+    agentName: "nex",
+  } as any);
+
+  assert.match(wechat?.text ?? "", /\/new \[agent-name\]/);
+  assert.match(wechat?.text ?? "", /\/abort/);
+  assert.doesNotMatch(wechat?.text ?? "", /\/verbose/);
+  assert.match(telegram?.text ?? "", /\/verbose on\|off/);
+});
+
 test("telegram /status can target a named agent", async () => {
   const agents = new Map([
     ["nex", makeAgent("nex", "speaker")],

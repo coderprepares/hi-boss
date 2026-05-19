@@ -240,3 +240,10 @@ See `docs/spec/adapters/wechat-clawbot.md`.
    - if bound: enriches the command with `agentName`
 4. `Daemon` computes the status for the bound agent by default, or for the named agent when one arg is provided, and returns the same key/value output as `hiboss agent status --name <agent-name>`, including live background delegation counts.
 5. `TelegramAdapter` replies with the returned status text.
+
+## `/help` (channel adapters)
+
+1. Boss sends `/help` to a supported chat adapter.
+2. The adapter emits a `ChannelCommand { command: "help", ... }`.
+3. `ChannelBridge` enforces boss-only behavior and resolves the bound/lane agent.
+4. `Daemon` replies with the commands supported by that adapter.

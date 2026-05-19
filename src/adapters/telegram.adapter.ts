@@ -103,6 +103,10 @@ export class TelegramAdapter implements ChatAdapter {
       await this.dispatchCommand(ctx, "abort");
     });
 
+    this.bot.command("help", async (ctx) => {
+      await this.dispatchCommand(ctx, "help");
+    });
+
     this.bot.command("verbose", async (ctx) => {
       await this.dispatchCommand(ctx, "verbose");
     });

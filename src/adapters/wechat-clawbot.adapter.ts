@@ -34,7 +34,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function parseSlashCommand(event: WechatClawbotSidecarEvent): ChannelCommand | undefined {
-  const match = event.text.match(/^\/(new|status|abort)(?:\s+(.*))?$/i);
+  const match = event.text.match(/^\/(new|status|abort|help)(?:\s+(.*))?$/i);
   if (!match) return undefined;
 
   return {

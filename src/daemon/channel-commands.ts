@@ -58,6 +58,22 @@ function buildAgentStatusText(params: {
   return renderAgentStatusText(result, params.db.getBossTimezone());
 }
 
+function buildChannelHelpText(platform: string | undefined): string {
+  const lines = [
+    "Hi-Boss commands:",
+    "/help - show this help",
+    "/new [agent-name] - request a fresh session",
+    "/status [agent-name] - show agent status",
+    "/abort - cancel current run and clear due pending inbox",
+  ];
+  if (platform === "telegram") {
+    lines.push("/verbose - show verbose mode");
+    lines.push("/verbose on|off - toggle runtime status updates");
+  }
+  lines.push("Commands are boss-only.");
+  return lines.join("\n");
+}
+
 export function createChannelCommandHandler(params: {
   db: HiBossDatabase;
   executor: AgentExecutor;
@@ -66,6 +82,10 @@ export function createChannelCommandHandler(params: {
   return (command): MessageContent | void => {
     const c = command as EnrichedChannelCommand;
     if (typeof c.command !== "string") return;
+
+    if (c.command === "help") {
+      return { text: buildChannelHelpText(c.platform) };
+    }
 
     if (c.command === "new" && typeof c.agentName === "string" && c.agentName) {
       const target = resolveTargetAgentName(c);

@@ -209,6 +209,27 @@ test("wechat-clawbot adapter turns sidecar slash commands into command replies",
   assert.deepEqual(posts[0].body, { text: "wechat-clawbot:status:kai:wxid_boss" });
 });
 
+test("wechat-clawbot adapter recognizes help slash command", async () => {
+  const posts: Array<{ body: unknown }> = [];
+  const fetchImpl = async (_input: string | URL, init?: RequestInit) => {
+    if ((init?.method ?? "GET") === "POST") {
+      posts.push({ body: JSON.parse(String(init?.body ?? "{}")) });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }
+    return new Response(JSON.stringify({
+      events: [{ event_id: "evt-help", account_id: "acct", peer_id: "wxid_boss", text: "/help" }],
+    }), { status: 200 });
+  };
+
+  const adapter = new WechatClawbotAdapter(makeAdapterToken(), { fetchImpl });
+  adapter.onCommand((command) => ({ text: `${command.platform}:${command.command}:${command.args}` }));
+
+  await adapter.pollOnce();
+
+  assert.equal(posts.length, 1);
+  assert.deepEqual(posts[0].body, { text: "wechat-clawbot:help:" });
+});
+
 test("wechat-clawbot adapter token rejects inline secrets", () => {
   assert.throws(
     () => parseWechatClawbotAdapterToken(JSON.stringify({
