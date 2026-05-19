@@ -408,6 +408,21 @@ Sidecar operations are documented in `docs/spec/adapters/wechat-clawbot-operatio
 - `issue-N-name:`
 - `issue-N-message:`
 
+`hiboss-wechat-clawbot-sidecar monitor-status` prints:
+- `ok:`
+- `cron-file:`
+- `cron-file-exists:`
+- `cron-command-present:`
+- `cron-notify-target-configured:`
+- `cron-active:` (`true|false|unknown`)
+- `log-file:`
+- `log-file-exists:`
+- `last-run-at:`
+- `last-monitor-status:` (`ok|alert|suppressed|notify-error`, or `(none)`)
+- `last-doctor-status:` (`ok|warn|error`, or `(none)`)
+- `last-notified:`
+- `last-issue-count:`
+
 ---
 
 ## TypeScript Interfaces

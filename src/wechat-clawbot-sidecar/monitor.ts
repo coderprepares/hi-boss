@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -41,12 +42,40 @@ export interface WechatClawbotMonitorOptions extends WechatClawbotDoctorOptions,
   notifyImpl?: (params: { token: string; to: string; text: string; hibossDir?: string }) => Promise<{ id?: string }>;
 }
 
+export interface WechatClawbotMonitorStatusCliOptions {
+  hibossDir?: string;
+  cronFile?: string;
+  logFile?: string;
+}
+
+export interface WechatClawbotMonitorStatusResult {
+  ok: boolean;
+  cronFile: string;
+  cronFileExists: boolean;
+  cronCommandPresent?: boolean;
+  cronNotifyTargetConfigured?: boolean;
+  cronActive: boolean | "unknown";
+  logFile: string;
+  logFileExists: boolean;
+  lastRunAt?: string;
+  lastMonitorStatus?: string;
+  lastDoctorStatus?: string;
+  lastNotified?: string;
+  lastIssueCount?: string;
+}
+
+export interface WechatClawbotMonitorStatusOptions extends WechatClawbotMonitorStatusCliOptions {
+  cronActiveImpl?: () => boolean | "unknown";
+}
+
 interface CooldownState {
   fingerprint?: string;
   notifiedAt?: number;
 }
 
 const DEFAULT_COOLDOWN_MS = 60 * 60 * 1000;
+const DEFAULT_CRON_FILE = "/etc/cron.d/hiboss-wechat-clawbot-monitor";
+const DEFAULT_LOG_FILE = "/var/log/hiboss-wechat-clawbot-monitor.log";
 
 function valueOrNone(value: unknown): string {
   return value === undefined || value === null || value === "" ? "(none)" : String(value);
@@ -62,6 +91,37 @@ function parseNonNegativeInt(value: string | undefined, label: string): number {
 function defaultCooldownFile(hibossDir: string | undefined): string | undefined {
   if (!hibossDir) return undefined;
   return path.join(hibossDir, ".daemon", "wechat-clawbot-monitor.cooldown.json");
+}
+
+function probeCronActive(): boolean | "unknown" {
+  let sawInactiveService = false;
+  for (const service of ["crond", "cron"]) {
+    let output = "";
+    try {
+      output = execFileSync("systemctl", ["is-active", service], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    } catch (error) {
+      const stdout = (error as { stdout?: Buffer | string }).stdout;
+      output = Buffer.isBuffer(stdout) ? stdout.toString("utf8").trim() : typeof stdout === "string" ? stdout.trim() : "";
+    }
+    if (output === "active") return true;
+    if (output && output !== "unknown") sawInactiveService = true;
+  }
+  return sawInactiveService ? false : "unknown";
+}
+
+function parseLastKeyValueBlock(content: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  const lines = content.trimEnd().split(/\r?\n/).reverse();
+  for (const line of lines) {
+    if (!line.includes(": ")) {
+      if (Object.keys(result).length > 0) break;
+      continue;
+    }
+    const index = line.indexOf(": ");
+    const key = line.slice(0, index);
+    if (/^[a-z0-9-]+$/.test(key)) result[key] = line.slice(index + 2);
+  }
+  return result;
 }
 
 function readCooldown(file: string | undefined): CooldownState | undefined {
@@ -270,6 +330,85 @@ export function parseWechatClawbotMonitorCliArgs(args: string[]): WechatClawbotM
       result.cooldownMs = parseNonNegativeInt(args[++index], "--cooldown-ms");
     } else if (arg === "--dry-run") {
       result.dryRun = true;
+    } else {
+      throw new Error(`Unknown arguments: ${args.slice(index).join(" ")}`);
+    }
+  }
+  return result;
+}
+
+export function runWechatClawbotMonitorStatus(options: WechatClawbotMonitorStatusOptions = {}): WechatClawbotMonitorStatusResult {
+  const cronFile = options.cronFile ?? DEFAULT_CRON_FILE;
+  const logFile = options.logFile ?? DEFAULT_LOG_FILE;
+  const cronFileExists = fs.existsSync(cronFile);
+  const logFileExists = fs.existsSync(logFile);
+  const cronText = cronFileExists ? fs.readFileSync(cronFile, "utf8") : "";
+  const cronCommandPresent = cronFileExists
+    ? /hiboss-wechat-clawbot-sidecar['"]?\s+monitor\b/.test(cronText)
+    : undefined;
+  const cronNotifyTargetConfigured = cronFileExists ? /--notify-to\s+["']?channel:[^"' \t]+/.test(cronText) : undefined;
+  const cronActive = options.cronActiveImpl ? options.cronActiveImpl() : probeCronActive();
+  const logStats = logFileExists ? fs.statSync(logFile) : undefined;
+  const last = logFileExists ? parseLastKeyValueBlock(fs.readFileSync(logFile, "utf8")) : {};
+  const lastIssueCount = last["issue-count"];
+  const lastOk = last["monitor-status"] === "ok" && lastIssueCount === "0";
+  const ok = Boolean(
+    cronFileExists &&
+      cronCommandPresent &&
+      cronNotifyTargetConfigured &&
+      cronActive === true &&
+      logFileExists &&
+      lastOk
+  );
+
+  return {
+    ok,
+    cronFile,
+    cronFileExists,
+    cronCommandPresent,
+    cronNotifyTargetConfigured,
+    cronActive,
+    logFile,
+    logFileExists,
+    lastRunAt: logStats ? logStats.mtime.toISOString() : undefined,
+    lastMonitorStatus: last["monitor-status"],
+    lastDoctorStatus: last["doctor-status"],
+    lastNotified: last.notified,
+    lastIssueCount,
+  };
+}
+
+export function formatWechatClawbotMonitorStatusResult(result: WechatClawbotMonitorStatusResult): string {
+  return [
+    `ok: ${result.ok ? "true" : "false"}`,
+    `cron-file: ${result.cronFile}`,
+    `cron-file-exists: ${result.cronFileExists ? "true" : "false"}`,
+    `cron-command-present: ${valueOrNone(result.cronCommandPresent)}`,
+    `cron-notify-target-configured: ${valueOrNone(result.cronNotifyTargetConfigured)}`,
+    `cron-active: ${valueOrNone(result.cronActive)}`,
+    `log-file: ${result.logFile}`,
+    `log-file-exists: ${result.logFileExists ? "true" : "false"}`,
+    `last-run-at: ${valueOrNone(result.lastRunAt)}`,
+    `last-monitor-status: ${valueOrNone(result.lastMonitorStatus)}`,
+    `last-doctor-status: ${valueOrNone(result.lastDoctorStatus)}`,
+    `last-notified: ${valueOrNone(result.lastNotified)}`,
+    `last-issue-count: ${valueOrNone(result.lastIssueCount)}`,
+  ].join("\n");
+}
+
+export function parseWechatClawbotMonitorStatusCliArgs(args: string[]): WechatClawbotMonitorStatusCliOptions {
+  const result: WechatClawbotMonitorStatusCliOptions = {};
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--hiboss-dir") {
+      result.hibossDir = args[++index];
+      if (!result.hibossDir) throw new Error("--hiboss-dir requires a value");
+    } else if (arg === "--cron-file") {
+      result.cronFile = args[++index];
+      if (!result.cronFile) throw new Error("--cron-file requires a value");
+    } else if (arg === "--log-file") {
+      result.logFile = args[++index];
+      if (!result.logFile) throw new Error("--log-file requires a value");
     } else {
       throw new Error(`Unknown arguments: ${args.slice(index).join(" ")}`);
     }

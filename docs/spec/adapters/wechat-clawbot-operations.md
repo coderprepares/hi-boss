@@ -127,6 +127,17 @@ suppressed for one hour. Override with `--cooldown-ms <ms>` or set
 `--cooldown-file <path>` to control the state location. Use `--dry-run` to test
 alert rendering without sending.
 
+Install or repair the cron-based monitor with the repo script:
+
+```bash
+scripts/install-wechat-clawbot-monitor.sh \
+  --config /root/hiboss/adapters/wechat-clawbot/sidecar.json \
+  --hiboss-dir /var/lib/hiboss \
+  --agent nex \
+  --notify-to channel:telegram:<chat-id> \
+  --interval-minutes 5
+```
+
 Monitor output is parseable key/value text:
 
 ```text
@@ -148,6 +159,30 @@ hiboss-recent-wechat-poll-failures: 0
 issue-count: 0
 ```
 
+Check whether the cron monitor is installed and recently healthy with:
+
+```bash
+hiboss-wechat-clawbot-sidecar monitor-status
+```
+
+Status output is parseable key/value text:
+
+```text
+ok: true|false
+cron-file: /etc/cron.d/hiboss-wechat-clawbot-monitor
+cron-file-exists: true|false
+cron-command-present: true|false|(none)
+cron-notify-target-configured: true|false|(none)
+cron-active: true|false|unknown
+log-file: /var/log/hiboss-wechat-clawbot-monitor.log
+log-file-exists: true|false
+last-run-at: 2026-05-19T14:00:00.000Z
+last-monitor-status: ok|alert|suppressed|notify-error|(none)
+last-doctor-status: ok|warn|error|(none)
+last-notified: true|false|(none)
+last-issue-count: 0
+```
+
 ## Production Checks
 
 After deploying sidecar code:
@@ -159,6 +194,8 @@ After deploying sidecar code:
    increments in doctor output.
 5. For monitoring, schedule the one-shot monitor command outside the daemon,
    preferably to a Telegram channel so WeChat failures can still be reported.
+6. Run `hiboss-wechat-clawbot-sidecar monitor-status` after installation and
+   after one real cron interval to confirm the system cron path is working.
 
 For the current PM2-style deployment, restart the sidecar process with:
 

@@ -12,8 +12,11 @@ import {
 import { runWechatClawbotLogin } from "./login.js";
 import {
   formatWechatClawbotMonitorResult,
+  formatWechatClawbotMonitorStatusResult,
   parseWechatClawbotMonitorCliArgs,
+  parseWechatClawbotMonitorStatusCliArgs,
   runWechatClawbotMonitor,
+  runWechatClawbotMonitorStatus,
 } from "./monitor.js";
 import { WechatClawbotSidecarServer } from "./server.js";
 
@@ -22,6 +25,7 @@ function printUsage(): void {
   hiboss-wechat-clawbot-sidecar [--config ./sidecar.json]
   hiboss-wechat-clawbot-sidecar doctor [--config ./sidecar.json] [--hiboss-dir /var/lib/hiboss] [--agent nex]
   hiboss-wechat-clawbot-sidecar monitor [--config ./sidecar.json] [--hiboss-dir /var/lib/hiboss] [--agent nex] [--notify-to channel:telegram:...]
+  hiboss-wechat-clawbot-sidecar monitor-status [--cron-file /etc/cron.d/hiboss-wechat-clawbot-monitor] [--log-file /var/log/hiboss-wechat-clawbot-monitor.log]
   hiboss-wechat-clawbot-sidecar login [--config ./sidecar.json]
   hiboss-wechat-clawbot-sidecar login-help
 
@@ -29,6 +33,7 @@ Source checkout equivalent:
   npm run wechat-clawbot-sidecar -- [--config ./sidecar.json]
   npm run wechat-clawbot-sidecar -- doctor [--config ./sidecar.json] [--hiboss-dir /var/lib/hiboss] [--agent nex]
   npm run wechat-clawbot-sidecar -- monitor [--config ./sidecar.json] [--hiboss-dir /var/lib/hiboss] [--agent nex] [--notify-to channel:telegram:...]
+  npm run wechat-clawbot-sidecar -- monitor-status [--cron-file /etc/cron.d/hiboss-wechat-clawbot-monitor] [--log-file /var/log/hiboss-wechat-clawbot-monitor.log]
   npm run wechat-clawbot-sidecar -- login [--config ./sidecar.json]
   npm run wechat-clawbot-sidecar -- login-help
 
@@ -133,6 +138,16 @@ async function main(): Promise<void> {
     const result = await runWechatClawbotMonitor({ config, ...monitorOptions });
     console.log(formatWechatClawbotMonitorResult(result));
     if (result.monitorStatus === "notify-error" || result.doctor.status === "error") process.exitCode = 1;
+    return;
+  }
+  if (args.includes("monitor-status")) {
+    const commandIndex = args.indexOf("monitor-status");
+    const commandArgs = args.slice(0, commandIndex).concat(args.slice(commandIndex + 1));
+    const { overrides } = parseSidecarCliArgs(commandArgs);
+    const statusOptions = parseWechatClawbotMonitorStatusCliArgs(overrides);
+    const result = runWechatClawbotMonitorStatus(statusOptions);
+    console.log(formatWechatClawbotMonitorStatusResult(result));
+    if (!result.ok) process.exitCode = 1;
     return;
   }
   if (args.includes("login")) {

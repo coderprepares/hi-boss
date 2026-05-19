@@ -6,8 +6,11 @@ import test from "node:test";
 
 import {
   formatWechatClawbotMonitorResult,
+  formatWechatClawbotMonitorStatusResult,
   parseWechatClawbotMonitorCliArgs,
+  parseWechatClawbotMonitorStatusCliArgs,
   runWechatClawbotMonitor,
+  runWechatClawbotMonitorStatus,
 } from "./monitor.js";
 import type { WechatClawbotSidecarConfig } from "./types.js";
 
@@ -156,5 +159,57 @@ test("wechat sidecar monitor parses notification flags", () => {
     notifyTo: "channel:telegram:123",
     cooldownMs: 60000,
     dryRun: true,
+  });
+});
+
+test("wechat sidecar monitor status reports installed cron health", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hiboss-monitor-status-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const cronFile = path.join(dir, "monitor.cron");
+  const logFile = path.join(dir, "monitor.log");
+  fs.writeFileSync(
+    cronFile,
+    "*/5 * * * * root hiboss-wechat-clawbot-sidecar monitor --notify-to \"channel:telegram:123\" >> /tmp/log 2>&1\n"
+  );
+  fs.writeFileSync(
+    logFile,
+    [
+      "ok: true",
+      "monitor-status: ok",
+      "doctor-status: ok",
+      "notified: false",
+      "issue-count: 0",
+      "",
+    ].join("\n")
+  );
+
+  const result = runWechatClawbotMonitorStatus({
+    cronFile,
+    logFile,
+    cronActiveImpl: () => true,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.cronCommandPresent, true);
+  assert.equal(result.cronNotifyTargetConfigured, true);
+  assert.equal(result.lastMonitorStatus, "ok");
+  assert.equal(result.lastIssueCount, "0");
+  const output = formatWechatClawbotMonitorStatusResult(result);
+  assert.match(output, /cron-active: true/);
+  assert.match(output, /last-monitor-status: ok/);
+});
+
+test("wechat sidecar monitor status parses file flags", () => {
+  assert.deepEqual(parseWechatClawbotMonitorStatusCliArgs([
+    "--hiboss-dir",
+    "/var/lib/hiboss",
+    "--cron-file",
+    "/etc/cron.d/test",
+    "--log-file",
+    "/var/log/test.log",
+  ]), {
+    hibossDir: "/var/lib/hiboss",
+    cronFile: "/etc/cron.d/test",
+    logFile: "/var/log/test.log",
   });
 });
