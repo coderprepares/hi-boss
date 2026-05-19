@@ -54,7 +54,11 @@ function fetchWithPendingOutbox(pendingOutbox: number): FetchLike {
         context_expiring_soon: 0,
         context_expired: 0,
       },
-      ilink_poll: { enabled: true, last_started_at: "2026-05-19T12:57:09.380Z" },
+      ilink_poll: {
+        enabled: true,
+        last_started_at: "2026-05-19T12:57:09.380Z",
+        last_completed_at: "2026-05-19T12:57:10.380Z",
+      },
     });
   };
 }
@@ -69,6 +73,7 @@ test("wechat sidecar monitor stays quiet when doctor is ok", async () => {
   const result = await runWechatClawbotMonitor({
     config: baseConfig,
     fetchImpl: fetchWithPendingOutbox(0),
+    nowMs: Date.parse("2026-05-19T12:57:11.000Z"),
     notifyTo: "channel:telegram:123",
     notifyImpl: async () => {
       throw new Error("should not notify");
@@ -88,6 +93,7 @@ test("wechat sidecar monitor sends notification when doctor has issues", async (
   const result = await runWechatClawbotMonitor({
     config: baseConfig,
     fetchImpl: fetchWithPendingOutbox(2),
+    nowMs: Date.parse("2026-05-19T12:57:11.000Z"),
     notifyTo: "channel:telegram:123",
     notifyTokenEnv: "HIBOSS_MONITOR_TOKEN",
     notifyImpl: async ({ token, to, text }) => {

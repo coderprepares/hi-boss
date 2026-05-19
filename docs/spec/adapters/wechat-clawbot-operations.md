@@ -64,6 +64,7 @@ context-expired: 0
 next-context-expires-at: 2026-05-20T08:05:43.455Z
 ilink-poll-enabled: true|false|(none)
 ilink-poll-last-started-at: 2026-05-19T12:57:09.380Z
+ilink-poll-last-started-age-seconds: 0
 ilink-poll-last-completed-at: 2026-05-19T12:57:07.379Z
 ilink-poll-last-completed-age-seconds: 2
 ilink-poll-max-age-seconds: 60
@@ -100,9 +101,10 @@ only for `error`.
 `status: warn` means the sidecar is reachable but has an operational concern,
 such as queued outbound messages, expired contexts, missing active context, or
 the most recent iLink poll error. It also warns when `last_completed_at` is
-older than `max(pollIntervalMs * 10, 60s)`. With `--hiboss-dir`, warnings also
-include a missing daemon PID/socket, missing boss id, missing `wechat-clawbot`
-binding for the named agent, absent persisted cursor, or cursor mismatch.
+older than `max(pollIntervalMs * 10, 60s)`, or when a started poll has not
+completed within that threshold. With `--hiboss-dir`, warnings also include a
+missing daemon PID/socket, missing boss id, missing `wechat-clawbot` binding for
+the named agent, absent persisted cursor, or cursor mismatch.
 
 ## Monitor Command
 

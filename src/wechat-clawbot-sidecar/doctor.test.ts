@@ -305,6 +305,43 @@ test("wechat sidecar doctor warns when iLink polling completion is stale", async
   assert.match(formatWechatClawbotDoctorResult(result), /issue-1-name: ilink-poll-stale/);
 });
 
+test("wechat sidecar doctor warns when iLink polling never completes", async () => {
+  const result = await runWechatClawbotDoctor({
+    config: baseConfig,
+    nowMs: Date.parse("2026-05-19T14:02:01.000Z"),
+    fetchImpl: async (input) => {
+      if (String(input).endsWith("/healthz")) {
+        return jsonResponse({ ok: true, service: "wechat-clawbot-sidecar", transport: "ilink" });
+      }
+      return jsonResponse({
+        ok: true,
+        service: "wechat-clawbot-sidecar",
+        transport: "ilink",
+        state: {
+          accounts: 1,
+          peers: 1,
+          events: 9,
+          next_cursor: "9",
+          pending_outbox: 0,
+          context_active: 1,
+          context_expiring_soon: 0,
+          context_expired: 0,
+        },
+        ilink_poll: {
+          enabled: true,
+          last_started_at: "2026-05-19T14:00:00.000Z",
+        },
+      });
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, "warn");
+  assert.equal(result.summary.ilinkPollLastStartedAgeSeconds, 121);
+  assert.deepEqual(result.issues.map((issue) => issue.name), ["ilink-poll-incomplete"]);
+  assert.match(formatWechatClawbotDoctorResult(result), /issue-1-name: ilink-poll-incomplete/);
+});
+
 test("wechat sidecar doctor errors when status leaks sensitive fields", async () => {
   const result = await runWechatClawbotDoctor({
     config: baseConfig,

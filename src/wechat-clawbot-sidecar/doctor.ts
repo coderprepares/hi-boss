@@ -30,6 +30,7 @@ export interface WechatClawbotDoctorSummary {
   nextContextExpiresAt?: string;
   ilinkPollEnabled?: boolean;
   ilinkPollLastStartedAt?: string;
+  ilinkPollLastStartedAgeSeconds?: number;
   ilinkPollLastCompletedAt?: string;
   ilinkPollLastCompletedAgeSeconds?: number;
   ilinkPollMaxAgeSeconds?: number;
@@ -331,6 +332,7 @@ export async function runWechatClawbotDoctor(options: WechatClawbotDoctorOptions
   const ilinkPoll = objectRecord(statusBody?.ilink_poll);
   summary.ilinkPollEnabled = boolField(ilinkPoll, "enabled");
   summary.ilinkPollLastStartedAt = stringField(ilinkPoll, "last_started_at");
+  summary.ilinkPollLastStartedAgeSeconds = ageSecondsSince(summary.ilinkPollLastStartedAt, nowMs);
   summary.ilinkPollLastCompletedAt = stringField(ilinkPoll, "last_completed_at");
   summary.ilinkPollLastCompletedAgeSeconds = ageSecondsSince(summary.ilinkPollLastCompletedAt, nowMs);
   summary.ilinkPollMaxAgeSeconds = Math.ceil(Math.max(options.config.pollIntervalMs * 10, 60_000) / 1000);
@@ -360,6 +362,19 @@ export async function runWechatClawbotDoctor(options: WechatClawbotDoctorOptions
   }
   if (summary.ilinkPollEnabled && !summary.ilinkPollLastStartedAt) {
     addIssue(issues, "warning", "ilink-poll-not-started", "iLink polling is enabled but has not started yet");
+  }
+  if (
+    summary.ilinkPollEnabled &&
+    summary.ilinkPollLastCompletedAgeSeconds === undefined &&
+    summary.ilinkPollLastStartedAgeSeconds !== undefined &&
+    summary.ilinkPollLastStartedAgeSeconds > summary.ilinkPollMaxAgeSeconds
+  ) {
+    addIssue(
+      issues,
+      "warning",
+      "ilink-poll-incomplete",
+      `iLink polling started ${summary.ilinkPollLastStartedAgeSeconds}s ago and has not completed`
+    );
   }
   if (
     summary.ilinkPollEnabled &&
@@ -420,6 +435,7 @@ export function formatWechatClawbotDoctorResult(result: WechatClawbotDoctorResul
     `next-context-expires-at: ${valueOrNone(result.summary.nextContextExpiresAt)}`,
     `ilink-poll-enabled: ${valueOrNone(result.summary.ilinkPollEnabled)}`,
     `ilink-poll-last-started-at: ${valueOrNone(result.summary.ilinkPollLastStartedAt)}`,
+    `ilink-poll-last-started-age-seconds: ${valueOrNone(result.summary.ilinkPollLastStartedAgeSeconds)}`,
     `ilink-poll-last-completed-at: ${valueOrNone(result.summary.ilinkPollLastCompletedAt)}`,
     `ilink-poll-last-completed-age-seconds: ${valueOrNone(result.summary.ilinkPollLastCompletedAgeSeconds)}`,
     `ilink-poll-max-age-seconds: ${valueOrNone(result.summary.ilinkPollMaxAgeSeconds)}`,
