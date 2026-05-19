@@ -9,9 +9,14 @@ import { WechatClawbotSidecarServer } from "./server.js";
 
 function printUsage(): void {
   console.log(`Usage:
-  tsx src/wechat-clawbot-sidecar/main.ts [--config ./sidecar.json]
-  tsx src/wechat-clawbot-sidecar/main.ts login [--config ./sidecar.json]
-  tsx src/wechat-clawbot-sidecar/main.ts login-help
+  hiboss-wechat-clawbot-sidecar [--config ./sidecar.json]
+  hiboss-wechat-clawbot-sidecar login [--config ./sidecar.json]
+  hiboss-wechat-clawbot-sidecar login-help
+
+Source checkout equivalent:
+  npm run wechat-clawbot-sidecar -- [--config ./sidecar.json]
+  npm run wechat-clawbot-sidecar -- login [--config ./sidecar.json]
+  npm run wechat-clawbot-sidecar -- login-help
 
 Environment defaults:
   HIBOSS_WECHAT_CLAWBOT_HOST
@@ -31,9 +36,13 @@ Environment defaults:
 function printLoginHelp(): void {
   console.log(`WeChat ClawBot login/token setup
 
-This sidecar does not embed QR login yet. Use the official OpenClaw weixin
-plugin or a trusted iLink login helper to obtain a bot token, then store it in a
-root-only file:
+Run QR login in this terminal to obtain an iLink bot token without printing it:
+
+  hiboss-wechat-clawbot-sidecar login --config /root/hiboss/adapters/wechat-clawbot/sidecar.json
+
+The login command writes the bot token to a root-only token file and updates the
+sidecar config with a botTokenFile reference. If you already have a bot token
+from a trusted iLink helper, store it in a root-only file:
 
   install -m 700 -d /root/hiboss/adapters/wechat-clawbot
   install -m 600 /dev/null /root/hiboss/adapters/wechat-clawbot/ilink-bot-token
@@ -51,6 +60,14 @@ Then reference the token file from sidecar config:
       }
     ]
   }
+
+Start the sidecar after login:
+
+  hiboss-wechat-clawbot-sidecar --config /root/hiboss/adapters/wechat-clawbot/sidecar.json
+
+Check local status without exposing message text, bot tokens, or context tokens:
+
+  curl -fsS http://127.0.0.1:26322/status
 
 Do not send bot tokens, QR data, context tokens, or state files through chat.
 `);

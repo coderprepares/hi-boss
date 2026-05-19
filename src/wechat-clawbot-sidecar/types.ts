@@ -77,6 +77,27 @@ export interface WechatClawbotSidecarState {
   account_cursors: Record<string, string>;
 }
 
+export interface WechatClawbotSidecarStateStatus {
+  accounts: number;
+  peers: number;
+  events: number;
+  next_cursor: string;
+  sent_messages: number;
+  pending_outbox: number;
+  pending_outbox_reasons: Record<string, number>;
+  context_active: number;
+  context_expiring_soon: number;
+  context_expired: number;
+  next_context_expires_at?: string;
+  last_event?: {
+    seq: number;
+    created_at: string;
+  };
+  last_sent?: {
+    created_at: string;
+  };
+}
+
 export interface IncomingWechatClawbotEvent {
   account_id?: string;
   accountId?: string;

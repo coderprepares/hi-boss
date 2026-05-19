@@ -8,7 +8,8 @@
     "node": ">=18"
   },
   "bin": {
-    "hiboss": "dist/bin/hiboss.js"
+    "hiboss": "dist/bin/hiboss.js",
+    "hiboss-wechat-clawbot-sidecar": "dist/src/wechat-clawbot-sidecar/main.js"
   },
   "files": [
     "dist/",
@@ -20,7 +21,7 @@
     "dev": "tsx watch src/daemon-entry.ts",
     "start": "tsx src/daemon-entry.ts",
     "build": "tsc",
-    "postbuild": "chmod +x dist/bin/hiboss.js",
+    "postbuild": "chmod +x dist/bin/hiboss.js dist/src/wechat-clawbot-sidecar/main.js",
     "prepack": "npm run build",
     "typecheck": "tsc --noEmit",
     "hiboss": "tsx bin/hiboss.ts",

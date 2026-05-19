@@ -32,21 +32,17 @@ Out of scope for MVP:
 
 ## Sidecar Contract
 
-The sidecar is expected to be a local HTTP service. It may start from the
-in-repo `src/wechat-clawbot-sidecar/` scaffold, then add an explicit iLink /
-OpenClaw transport later.
-
-The initial in-repo sidecar is independent from the Hi-Boss daemon process. It
-uses Node's HTTP server, listens on `127.0.0.1` by default, stores local scaffold
-state in a mode-`0600` JSON file, and does not require real WeChat login for
-local tests.
+The sidecar is a local HTTP service independent from the Hi-Boss daemon process.
+The in-repo implementation uses Node's HTTP server, listens on `127.0.0.1` by
+default, stores local state in a mode-`0600` JSON file, and supports both mock
+tests and iLink-backed WeChat sessions.
 
 The sidecar has two transport modes:
 - `mock` — default, local-only development mode with optional mock event ingest.
 - `ilink` — calls OpenClaw/iLink-style `/ilink/bot/getupdates` and
   `/ilink/bot/sendmessage` endpoints using bot tokens supplied by env or token
-  files. It does not perform QR login; operators must provision valid bot
-  tokens/login state outside Hi-Boss.
+  files. QR login is available through the sidecar CLI and writes bot tokens to
+  token files instead of printing or embedding them in config.
 
 ### Auth
 
@@ -152,6 +148,18 @@ Response:
 }
 ```
 
+### `GET /status`
+
+Returns no-secret operational status for local diagnostics. The response
+includes transport, poll timing, state counters, pending outbox counts, context
+expiry counts, last event/sent timestamps, and the latest redacted iLink poll
+error. It does not include message text, bot tokens, sidecar API tokens,
+`context_token` values, token file paths, or state file paths.
+
+This endpoint intentionally does not require bearer auth so local supervisors can
+probe it. Keep the sidecar bound to loopback unless explicitly testing
+non-local binds.
+
 ### `GET /accounts`
 
 Returns known local accounts and peer counts without secrets.
@@ -236,6 +244,12 @@ Run the local file-backed scaffold without real WeChat credentials:
 
 ```bash
 npm run wechat-clawbot-sidecar
+```
+
+After `npm run build` or package installation, the published sidecar binary is:
+
+```bash
+hiboss-wechat-clawbot-sidecar --config /root/hiboss/adapters/wechat-clawbot/sidecar.json
 ```
 
 Print safe local token setup guidance:
@@ -369,9 +383,9 @@ The sidecar config parser rejects inline `apiToken`, `token`, `botToken`, and
 `contextToken` fields. Secrets must be provided by env indirection or token
 files only.
 
-A real iLink/OpenClaw transport must be added explicitly and must keep iLink
-tokens, QR/login state, `get_updates_buf`, and `context_token` outside Hi-Boss
-envelopes, prompts, and logs.
+The iLink/OpenClaw transport keeps iLink tokens, QR/login state,
+`get_updates_buf`, and `context_token` outside Hi-Boss envelopes, prompts, and
+logs.
 
 Example `ilink` transport config:
 

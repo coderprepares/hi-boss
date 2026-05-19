@@ -43,13 +43,13 @@ async function fetchJson(url: string, init?: RequestInit): Promise<{ status: num
   return { status: response.status, body: await response.json() };
 }
 
-async function waitFor(check: () => boolean, timeoutMs = 1000): Promise<void> {
+async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 1000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (check()) return;
+    if (await check()) return;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  assert.equal(check(), true);
+  assert.equal(await check(), true);
 }
 
 test("sidecar accepts mock text events, exposes cursor updates, and sends replies", async () => {
@@ -139,6 +139,40 @@ test("sidecar protects API routes with bearer token when configured", async () =
   }
 });
 
+test("sidecar status exposes operational counters without message or context bodies", async () => {
+  const sidecar = await startSidecar({}, "test-token");
+  try {
+    await fetchJson(`${sidecar.url()}/__mock/events`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer test-token",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        peer_id: "wxid_boss",
+        message_id: "msg-status",
+        text: "sensitive message body",
+        context_token_ref: "secret-context-token",
+      }),
+    });
+
+    const status = await fetchJson(`${sidecar.url()}/status`);
+    assert.equal(status.status, 200);
+    assert.equal(status.body.service, "wechat-clawbot-sidecar");
+    assert.equal(status.body.transport, "mock");
+    assert.equal(status.body.state.accounts, 1);
+    assert.equal(status.body.state.events, 1);
+    assert.equal(status.body.state.pending_outbox, 0);
+    assert.equal(status.body.state.context_active, 1);
+
+    const serialized = JSON.stringify(status.body);
+    assert.equal(serialized.includes("sensitive message body"), false);
+    assert.equal(serialized.includes("secret-context-token"), false);
+  } finally {
+    await sidecar.stop();
+  }
+});
+
 test("sidecar resolves API token from env or token file without inline config secrets", () => {
   const tokenFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "wechat-clawbot-token-")), "token");
   fs.writeFileSync(tokenFile, "file-token\n", { mode: 0o600 });
@@ -177,6 +211,27 @@ test("sidecar rejects inline iLink bot tokens and requires account token indirec
     () => loadWechatClawbotSidecarConfig(configPath, {}),
     /Do not store iLink tokens inline/
   );
+});
+
+test("sidecar status records the most recent iLink poll error", async () => {
+  process.env.ILINK_TOKEN = "test-bot-token";
+  const sidecar = await startSidecar({
+    transport: "ilink",
+    pollIntervalMs: 50,
+    requestTimeoutMs: 1000,
+    ilinkApiBaseUrl: "http://127.0.0.1:1",
+    ilinkAccounts: [{ accountId: "acct", botTokenEnv: "ILINK_TOKEN" }],
+  }, undefined, async () => new Response(JSON.stringify({ ok: false }), { status: 500 }));
+
+  try {
+    await waitFor(async () => {
+      const status = await fetchJson(`${sidecar.url()}/status`);
+      return status.body.ilink_poll.last_error === "iLink HTTP 500";
+    });
+  } finally {
+    delete process.env.ILINK_TOKEN;
+    await sidecar.stop();
+  }
 });
 
 test("sidecar iLink transport polls updates and sends through context token", async () => {

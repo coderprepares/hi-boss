@@ -71,12 +71,24 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+function safeStatusError(err: unknown): string {
+  return errorMessage(err)
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/(bot[_-]?token[\"']?\s*[:=]\s*[\"']?)[^\"'\s,}]+/gi, "$1[redacted]")
+    .slice(0, 500);
+}
+
 export class WechatClawbotSidecarServer {
   private server: http.Server;
   private store: WechatClawbotStateStore;
   private ilink?: WechatClawbotIlinkClient;
   private pollTimer?: NodeJS.Timeout;
   private stopped = true;
+  private startedAt = new Date().toISOString();
+  private lastPollStartedAt?: string;
+  private lastPollCompletedAt?: string;
+  private lastPollErrorAt?: string;
+  private lastPollError?: string;
 
   constructor(
     private config: WechatClawbotSidecarConfig,
@@ -136,6 +148,26 @@ export class WechatClawbotSidecarServer {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/status") {
+      json(res, 200, {
+        ok: true,
+        service: "wechat-clawbot-sidecar",
+        transport: this.config.transport,
+        started_at: this.startedAt,
+        poll_interval_ms: this.config.pollIntervalMs,
+        request_timeout_ms: this.config.requestTimeoutMs,
+        state: this.store.getStatusSnapshot(),
+        ilink_poll: {
+          enabled: Boolean(this.ilink),
+          last_started_at: this.lastPollStartedAt,
+          last_completed_at: this.lastPollCompletedAt,
+          last_error_at: this.lastPollErrorAt,
+          last_error: this.lastPollError,
+        },
+      });
+      return;
+    }
+
     requireAuth(req, this.runtime.apiToken);
 
     if (req.method === "GET" && url.pathname === "/accounts") {
@@ -185,13 +217,17 @@ export class WechatClawbotSidecarServer {
   private startPolling(): void {
     if (!this.ilink || this.stopped) return;
     this.pollTimer = setTimeout(async () => {
-      await this.pollIlinkOnce().catch(() => undefined);
+      await this.pollIlinkOnce().catch((err) => {
+        this.lastPollErrorAt = new Date().toISOString();
+        this.lastPollError = safeStatusError(err);
+      });
       this.startPolling();
     }, this.config.pollIntervalMs);
   }
 
   private async pollIlinkOnce(): Promise<void> {
     if (!this.ilink) return;
+    this.lastPollStartedAt = new Date().toISOString();
     for (const account of this.config.ilinkAccounts) {
       const cursor = this.store.getAccountCursor(account.accountId);
       const updates = await this.ilink.fetchUpdates(account, cursor);
@@ -209,6 +245,8 @@ export class WechatClawbotSidecarServer {
       this.store.setAccountCursor(account.accountId, updates.nextCursor);
     }
     await this.sendExpiryReminders().catch(() => undefined);
+    this.lastPollCompletedAt = new Date().toISOString();
+    this.lastPollError = undefined;
   }
 
   private async sendText(accountId: string, peerId: string, text: string) {

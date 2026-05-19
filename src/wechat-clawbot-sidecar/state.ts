@@ -9,6 +9,7 @@ import {
   type StoredWechatClawbotSentMessage,
   type WechatClawbotPeerState,
   type WechatClawbotSidecarState,
+  type WechatClawbotSidecarStateStatus,
 } from "./types.js";
 
 const CONTEXT_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -75,6 +76,59 @@ export class WechatClawbotStateStore {
       accounts.set(peer.account_id, (accounts.get(peer.account_id) ?? 0) + 1);
     }
     return Array.from(accounts.entries()).map(([account_id, peers]) => ({ account_id, peers }));
+  }
+
+  getStatusSnapshot(now = new Date()): WechatClawbotSidecarStateStatus {
+    const nowMs = now.getTime();
+    const soonMs = nowMs + 60 * 60 * 1000;
+    const pendingReasons: Record<string, number> = {};
+    for (const pending of this.state.pending_outbox) {
+      pendingReasons[pending.reason] = (pendingReasons[pending.reason] ?? 0) + 1;
+    }
+
+    let contextActive = 0;
+    let contextExpiringSoon = 0;
+    let contextExpired = 0;
+    let nextContextExpiresAt: string | undefined;
+    for (const peer of this.state.peers) {
+      if (!peer.context_token_ref || !peer.context_expires_at) continue;
+      const expiresMs = Date.parse(peer.context_expires_at);
+      if (!Number.isFinite(expiresMs)) continue;
+      if (expiresMs <= nowMs) {
+        contextExpired += 1;
+        continue;
+      }
+      contextActive += 1;
+      if (expiresMs <= soonMs) contextExpiringSoon += 1;
+      if (!nextContextExpiresAt || expiresMs < Date.parse(nextContextExpiresAt)) {
+        nextContextExpiresAt = peer.context_expires_at;
+      }
+    }
+
+    const lastEvent = this.state.events.reduce<StoredWechatClawbotEvent | undefined>(
+      (current, event) => (!current || event.seq > current.seq ? event : current),
+      undefined
+    );
+    const lastSent = this.state.sent_messages.reduce<StoredWechatClawbotSentMessage | undefined>(
+      (current, sent) => (!current || sent.created_at > current.created_at ? sent : current),
+      undefined
+    );
+
+    return {
+      accounts: this.listAccounts().length,
+      peers: this.state.peers.length,
+      events: this.state.events.length,
+      next_cursor: String(Math.max(0, this.state.next_seq - 1)),
+      sent_messages: this.state.sent_messages.length,
+      pending_outbox: this.state.pending_outbox.length,
+      pending_outbox_reasons: pendingReasons,
+      context_active: contextActive,
+      context_expiring_soon: contextExpiringSoon,
+      context_expired: contextExpired,
+      next_context_expires_at: nextContextExpiresAt,
+      last_event: lastEvent ? { seq: lastEvent.seq, created_at: lastEvent.created_at } : undefined,
+      last_sent: lastSent ? { created_at: lastSent.created_at } : undefined,
+    };
   }
 
   getUpdates(cursor?: string): { events: StoredWechatClawbotEvent[]; next_cursor: string } {
