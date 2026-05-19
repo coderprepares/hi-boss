@@ -11,19 +11,35 @@ The sidecar binary includes a no-secret doctor command:
 hiboss-wechat-clawbot-sidecar doctor --config /root/hiboss/adapters/wechat-clawbot/sidecar.json
 ```
 
+To include local Hi-Boss daemon and SQLite state checks, pass the Hi-Boss data
+directory and optionally the agent expected to own the `wechat-clawbot` binding:
+
+```bash
+hiboss-wechat-clawbot-sidecar doctor \
+  --config /root/hiboss/adapters/wechat-clawbot/sidecar.json \
+  --hiboss-dir /var/lib/hiboss \
+  --agent nex
+```
+
 Source checkout equivalent:
 
 ```bash
-npm run wechat-clawbot-sidecar -- doctor --config /root/hiboss/adapters/wechat-clawbot/sidecar.json
+npm run wechat-clawbot-sidecar -- doctor \
+  --config /root/hiboss/adapters/wechat-clawbot/sidecar.json \
+  --hiboss-dir /var/lib/hiboss \
+  --agent nex
 ```
 
 The command loads the local sidecar config and probes:
 - `GET /healthz`
 - `GET /status`
 
-It does not read Hi-Boss SQLite state, bot token files, sidecar API token files,
-or iLink bot tokens. It must not print message text, token values,
-`context_token` values, token file paths, or state file paths.
+By default it does not read Hi-Boss SQLite state, bot token files, sidecar API
+token files, or iLink bot tokens. With `--hiboss-dir`, it reads only local
+daemon metadata, `daemon.log`, and selected non-secret SQLite rows needed to
+check `adapter_boss_id_wechat-clawbot`, persisted adapter cursors, and the
+named agent binding. It must not print message text, token values,
+`context_token` values, token file paths, state file paths, or adapter tokens.
 
 Output is parseable key/value text:
 
@@ -49,6 +65,19 @@ ilink-poll-last-started-at: 2026-05-19T12:57:09.380Z
 ilink-poll-last-completed-at: 2026-05-19T12:57:07.379Z
 ilink-poll-last-error-at: (none)
 ilink-poll-last-error: (none)
+hiboss-dir: /var/lib/hiboss
+hiboss-db-exists: true|false|(none)
+hiboss-daemon-pid-file-exists: true|false|(none)
+hiboss-daemon-process-alive: true|false|(none)
+hiboss-daemon-socket-exists: true|false|(none)
+hiboss-agent: nex|(none)
+hiboss-agent-exists: true|false|(none)
+hiboss-wechat-binding: true|false|(none)
+hiboss-boss-id-configured: true|false|(none)
+hiboss-wechat-cursor-count: 1
+hiboss-wechat-cursor-max: 9
+hiboss-cursor-matches-sidecar: true|false|(none)
+hiboss-recent-wechat-poll-failures: 0
 issue-count: 0
 ```
 
@@ -66,7 +95,9 @@ only for `error`.
 
 `status: warn` means the sidecar is reachable but has an operational concern,
 such as queued outbound messages, expired contexts, missing active context, or
-the most recent iLink poll error.
+the most recent iLink poll error. With `--hiboss-dir`, warnings also include a
+missing daemon PID/socket, missing boss id, missing `wechat-clawbot` binding for
+the named agent, absent persisted cursor, or cursor mismatch.
 
 ## Production Checks
 

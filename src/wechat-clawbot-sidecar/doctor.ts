@@ -1,3 +1,7 @@
+import Database from "better-sqlite3";
+import * as fs from "fs";
+import * as path from "path";
+
 import type { WechatClawbotSidecarConfig } from "./types.js";
 
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
@@ -27,6 +31,19 @@ export interface WechatClawbotDoctorSummary {
   ilinkPollLastCompletedAt?: string;
   ilinkPollLastErrorAt?: string;
   ilinkPollLastError?: string;
+  hibossDir?: string;
+  hibossDbExists?: boolean;
+  hibossDaemonPidFileExists?: boolean;
+  hibossDaemonProcessAlive?: boolean;
+  hibossDaemonSocketExists?: boolean;
+  hibossAgent?: string;
+  hibossAgentExists?: boolean;
+  hibossWechatBinding?: boolean;
+  hibossBossIdConfigured?: boolean;
+  hibossWechatCursorCount?: number;
+  hibossWechatCursorMax?: string;
+  hibossCursorMatchesSidecar?: boolean;
+  hibossRecentWechatPollFailures?: number;
 }
 
 export interface WechatClawbotDoctorResult {
@@ -39,7 +56,14 @@ export interface WechatClawbotDoctorResult {
 
 export interface WechatClawbotDoctorOptions {
   config: WechatClawbotSidecarConfig;
+  hibossDir?: string;
+  agentName?: string;
   fetchImpl?: FetchLike;
+}
+
+export interface WechatClawbotDoctorCliOptions {
+  hibossDir?: string;
+  agentName?: string;
 }
 
 function probeHost(host: string): string {
@@ -95,6 +119,150 @@ function addIssue(
   message: string
 ): void {
   issues.push({ level, name, message });
+}
+
+function parsePositiveInt(value: string | undefined): number | undefined {
+  if (!value || !/^\d+$/.test(value)) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+function processAlive(pid: number | undefined): boolean | undefined {
+  if (pid === undefined) return undefined;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function maxNumericString(values: string[]): string | undefined {
+  const numeric = values
+    .filter((value) => /^\d+$/.test(value))
+    .map((value) => BigInt(value));
+  if (numeric.length === 0) return undefined;
+  return numeric.reduce((max, value) => value > max ? value : max, numeric[0]).toString();
+}
+
+function countRecentWechatPollFailures(logPath: string): number | undefined {
+  if (!fs.existsSync(logPath)) return undefined;
+  try {
+    const lines = fs.readFileSync(logPath, "utf8").split(/\r?\n/).slice(-200);
+    return lines.filter((line) => line.includes("[wechat-clawbot] sidecar poll failed")).length;
+  } catch {
+    return undefined;
+  }
+}
+
+function inspectHibossLocalState(params: {
+  hibossDir: string;
+  agentName?: string;
+  sidecarNextCursor?: string;
+  summary: WechatClawbotDoctorSummary;
+  issues: WechatClawbotDoctorIssue[];
+}): void {
+  const daemonDir = path.join(params.hibossDir, ".daemon");
+  const dbPath = path.join(daemonDir, "hiboss.db");
+  const pidPath = path.join(daemonDir, "daemon.pid");
+  const socketPath = path.join(daemonDir, "daemon.sock");
+  const logPath = path.join(daemonDir, "daemon.log");
+
+  params.summary.hibossDir = params.hibossDir;
+  params.summary.hibossDbExists = fs.existsSync(dbPath);
+  params.summary.hibossDaemonPidFileExists = fs.existsSync(pidPath);
+  params.summary.hibossDaemonSocketExists = fs.existsSync(socketPath);
+  params.summary.hibossRecentWechatPollFailures = countRecentWechatPollFailures(logPath);
+
+  if (params.summary.hibossDaemonPidFileExists) {
+    try {
+      const pid = parsePositiveInt(fs.readFileSync(pidPath, "utf8").trim());
+      params.summary.hibossDaemonProcessAlive = processAlive(pid);
+    } catch {
+      params.summary.hibossDaemonProcessAlive = undefined;
+    }
+  }
+  if (!params.summary.hibossDaemonPidFileExists) {
+    addIssue(params.issues, "warning", "hiboss-daemon-pid", "Hi-Boss daemon PID file is missing");
+  } else if (params.summary.hibossDaemonProcessAlive === undefined) {
+    addIssue(params.issues, "warning", "hiboss-daemon-pid", "Hi-Boss daemon PID file is not readable or invalid");
+  } else if (params.summary.hibossDaemonProcessAlive === false) {
+    addIssue(params.issues, "warning", "hiboss-daemon-process", "Hi-Boss daemon PID is not alive");
+  }
+  if (!params.summary.hibossDaemonSocketExists) {
+    addIssue(params.issues, "warning", "hiboss-daemon-socket", "Hi-Boss daemon socket is missing");
+  }
+  if (!params.summary.hibossDbExists) {
+    addIssue(params.issues, "error", "hiboss-db", "Hi-Boss SQLite database is missing");
+    return;
+  }
+
+  try {
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    try {
+      if (params.agentName) {
+        params.summary.hibossAgent = params.agentName;
+        const agent = db.prepare("SELECT name FROM agents WHERE lower(name) = lower(?)").get(params.agentName) as
+          | { name: string }
+          | undefined;
+        params.summary.hibossAgentExists = Boolean(agent);
+        if (!agent) {
+          addIssue(params.issues, "warning", "hiboss-agent", `Hi-Boss agent '${params.agentName}' was not found`);
+        } else {
+          const binding = db.prepare(
+            "SELECT COUNT(*) AS count FROM agent_bindings WHERE agent_name = ? AND adapter_type = 'wechat-clawbot'"
+          ).get(agent.name) as { count: number };
+          params.summary.hibossWechatBinding = binding.count > 0;
+          if (binding.count === 0) {
+            addIssue(
+              params.issues,
+              "warning",
+              "hiboss-wechat-binding",
+              `Agent '${agent.name}' has no wechat-clawbot binding`
+            );
+          }
+        }
+      }
+
+      const bossId = db.prepare("SELECT value FROM config WHERE key = 'adapter_boss_id_wechat-clawbot'").get() as
+        | { value: string }
+        | undefined;
+      params.summary.hibossBossIdConfigured = Boolean(bossId?.value?.trim());
+      if (!params.summary.hibossBossIdConfigured) {
+        addIssue(params.issues, "warning", "hiboss-boss-id", "adapter_boss_id_wechat-clawbot is not configured");
+      }
+
+      const cursorRows = db.prepare(
+        "SELECT value FROM config WHERE key LIKE 'adapter_cursor_v1:wechat-clawbot:%'"
+      ).all() as Array<{ value: string }>;
+      const cursorValues = cursorRows.map((row) => String(row.value));
+      params.summary.hibossWechatCursorCount = cursorValues.length;
+      params.summary.hibossWechatCursorMax = maxNumericString(cursorValues);
+      if (cursorValues.length === 0) {
+        addIssue(params.issues, "warning", "hiboss-wechat-cursor", "No persisted wechat-clawbot adapter cursor was found");
+      }
+      if (params.sidecarNextCursor && cursorValues.length > 0) {
+        params.summary.hibossCursorMatchesSidecar = cursorValues.includes(params.sidecarNextCursor);
+        if (!params.summary.hibossCursorMatchesSidecar) {
+          addIssue(
+            params.issues,
+            "warning",
+            "hiboss-wechat-cursor-lag",
+            "Persisted adapter cursor does not match sidecar next-cursor"
+          );
+        }
+      }
+    } finally {
+      db.close();
+    }
+  } catch (err) {
+    addIssue(
+      params.issues,
+      "error",
+      "hiboss-db-read",
+      err instanceof Error ? err.message : String(err)
+    );
+  }
 }
 
 export async function runWechatClawbotDoctor(options: WechatClawbotDoctorOptions): Promise<WechatClawbotDoctorResult> {
@@ -176,6 +344,15 @@ export async function runWechatClawbotDoctor(options: WechatClawbotDoctorOptions
   if (summary.ilinkPollEnabled && !summary.ilinkPollLastStartedAt) {
     addIssue(issues, "warning", "ilink-poll-not-started", "iLink polling is enabled but has not started yet");
   }
+  if (options.hibossDir) {
+    inspectHibossLocalState({
+      hibossDir: options.hibossDir,
+      agentName: options.agentName,
+      sidecarNextCursor: summary.nextCursor,
+      summary,
+      issues,
+    });
+  }
 
   const hasError = issues.some((issue) => issue.level === "error");
   const hasWarning = issues.some((issue) => issue.level === "warning");
@@ -215,6 +392,19 @@ export function formatWechatClawbotDoctorResult(result: WechatClawbotDoctorResul
     `ilink-poll-last-completed-at: ${valueOrNone(result.summary.ilinkPollLastCompletedAt)}`,
     `ilink-poll-last-error-at: ${valueOrNone(result.summary.ilinkPollLastErrorAt)}`,
     `ilink-poll-last-error: ${valueOrNone(result.summary.ilinkPollLastError)}`,
+    `hiboss-dir: ${valueOrNone(result.summary.hibossDir)}`,
+    `hiboss-db-exists: ${valueOrNone(result.summary.hibossDbExists)}`,
+    `hiboss-daemon-pid-file-exists: ${valueOrNone(result.summary.hibossDaemonPidFileExists)}`,
+    `hiboss-daemon-process-alive: ${valueOrNone(result.summary.hibossDaemonProcessAlive)}`,
+    `hiboss-daemon-socket-exists: ${valueOrNone(result.summary.hibossDaemonSocketExists)}`,
+    `hiboss-agent: ${valueOrNone(result.summary.hibossAgent)}`,
+    `hiboss-agent-exists: ${valueOrNone(result.summary.hibossAgentExists)}`,
+    `hiboss-wechat-binding: ${valueOrNone(result.summary.hibossWechatBinding)}`,
+    `hiboss-boss-id-configured: ${valueOrNone(result.summary.hibossBossIdConfigured)}`,
+    `hiboss-wechat-cursor-count: ${valueOrNone(result.summary.hibossWechatCursorCount)}`,
+    `hiboss-wechat-cursor-max: ${valueOrNone(result.summary.hibossWechatCursorMax)}`,
+    `hiboss-cursor-matches-sidecar: ${valueOrNone(result.summary.hibossCursorMatchesSidecar)}`,
+    `hiboss-recent-wechat-poll-failures: ${valueOrNone(result.summary.hibossRecentWechatPollFailures)}`,
     `issue-count: ${result.issues.length}`,
   ];
 
@@ -226,4 +416,23 @@ export function formatWechatClawbotDoctorResult(result: WechatClawbotDoctorResul
   });
 
   return lines.join("\n");
+}
+
+export function parseWechatClawbotDoctorCliArgs(args: string[]): WechatClawbotDoctorCliOptions {
+  const result: WechatClawbotDoctorCliOptions = {};
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--hiboss-dir") {
+      const value = args[++index];
+      if (!value) throw new Error("--hiboss-dir requires a value");
+      result.hibossDir = value;
+    } else if (arg === "--agent") {
+      const value = args[++index];
+      if (!value) throw new Error("--agent requires a value");
+      result.agentName = value;
+    } else {
+      throw new Error(`Unknown arguments: ${args.slice(index).join(" ")}`);
+    }
+  }
+  return result;
 }

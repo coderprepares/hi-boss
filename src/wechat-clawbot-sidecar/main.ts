@@ -6,6 +6,7 @@ import {
 } from "./config.js";
 import {
   formatWechatClawbotDoctorResult,
+  parseWechatClawbotDoctorCliArgs,
   runWechatClawbotDoctor,
 } from "./doctor.js";
 import { runWechatClawbotLogin } from "./login.js";
@@ -14,13 +15,13 @@ import { WechatClawbotSidecarServer } from "./server.js";
 function printUsage(): void {
   console.log(`Usage:
   hiboss-wechat-clawbot-sidecar [--config ./sidecar.json]
-  hiboss-wechat-clawbot-sidecar doctor [--config ./sidecar.json]
+  hiboss-wechat-clawbot-sidecar doctor [--config ./sidecar.json] [--hiboss-dir /var/lib/hiboss] [--agent nex]
   hiboss-wechat-clawbot-sidecar login [--config ./sidecar.json]
   hiboss-wechat-clawbot-sidecar login-help
 
 Source checkout equivalent:
   npm run wechat-clawbot-sidecar -- [--config ./sidecar.json]
-  npm run wechat-clawbot-sidecar -- doctor [--config ./sidecar.json]
+  npm run wechat-clawbot-sidecar -- doctor [--config ./sidecar.json] [--hiboss-dir /var/lib/hiboss] [--agent nex]
   npm run wechat-clawbot-sidecar -- login [--config ./sidecar.json]
   npm run wechat-clawbot-sidecar -- login-help
 
@@ -79,6 +80,10 @@ Run the local no-secret doctor check:
 
   hiboss-wechat-clawbot-sidecar doctor --config /root/hiboss/adapters/wechat-clawbot/sidecar.json
 
+Include local Hi-Boss daemon and SQLite binding checks:
+
+  hiboss-wechat-clawbot-sidecar doctor --config /root/hiboss/adapters/wechat-clawbot/sidecar.json --hiboss-dir /var/lib/hiboss --agent nex
+
 Do not send bot tokens, QR data, context tokens, or state files through chat.
 `);
 }
@@ -94,12 +99,16 @@ async function main(): Promise<void> {
     return;
   }
   if (args.includes("doctor")) {
-    const { configPath, overrides } = parseSidecarCliArgs(args.filter((arg) => arg !== "doctor"));
-    if (overrides.length > 0) {
-      throw new Error(`Unknown arguments: ${overrides.join(" ")}`);
-    }
+    const commandIndex = args.indexOf("doctor");
+    const commandArgs = args.slice(0, commandIndex).concat(args.slice(commandIndex + 1));
+    const { configPath, overrides } = parseSidecarCliArgs(commandArgs);
+    const doctorOptions = parseWechatClawbotDoctorCliArgs(overrides);
     const config = loadWechatClawbotSidecarConfig(configPath);
-    const result = await runWechatClawbotDoctor({ config });
+    const result = await runWechatClawbotDoctor({
+      config,
+      hibossDir: doctorOptions.hibossDir,
+      agentName: doctorOptions.agentName,
+    });
     console.log(formatWechatClawbotDoctorResult(result));
     if (result.status === "error") process.exitCode = 1;
     return;
