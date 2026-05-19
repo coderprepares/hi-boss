@@ -4,6 +4,7 @@ import * as path from "path";
 import {
   SidecarHttpError,
   type IncomingWechatClawbotEvent,
+  type StoredWechatClawbotInReplyTo,
   type WechatClawbotPendingOutboundMessage,
   type StoredWechatClawbotEvent,
   type StoredWechatClawbotSentMessage,
@@ -35,6 +36,14 @@ function stringField(record: IncomingWechatClawbotEvent, ...keys: Array<keyof In
   return undefined;
 }
 
+function numberField(record: IncomingWechatClawbotEvent, ...keys: Array<keyof IncomingWechatClawbotEvent>): number | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
 function safeIdPart(value: string): string {
   return value.replace(/[^a-zA-Z0-9_.:-]/g, "_");
 }
@@ -60,6 +69,32 @@ function ensureStateShape(value: unknown): WechatClawbotSidecarState {
         ? record.account_cursors as Record<string, string>
         : {},
   };
+}
+
+function normalizeInReplyTo(input: IncomingWechatClawbotEvent): StoredWechatClawbotInReplyTo | undefined {
+  const raw = input.in_reply_to ?? input.inReplyTo;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const record = raw as Record<string, unknown>;
+  const result: StoredWechatClawbotInReplyTo = {};
+
+  for (const [target, keys] of [
+    ["channel_message_id", ["channel_message_id", "channelMessageId"]],
+    ["source_message_id", ["source_message_id", "sourceMessageId", "message_id", "messageId"]],
+    ["text", ["text"]],
+  ] as const) {
+    const value = keys.map((key) => record[key]).find((item) => typeof item === "string" && item.trim());
+    if (typeof value === "string") result[target] = value.trim();
+  }
+
+  const sourceCreateTimeMs = ["source_create_time_ms", "sourceCreateTimeMs", "create_time_ms", "createTimeMs"]
+    .map((key) => record[key])
+    .find((item) => typeof item === "number" && Number.isFinite(item));
+  if (typeof sourceCreateTimeMs === "number") result.source_create_time_ms = sourceCreateTimeMs;
+
+  const sourceType = record.source_type ?? record.sourceType ?? record.type;
+  if (typeof sourceType === "string" || typeof sourceType === "number") result.source_type = sourceType;
+
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 export class WechatClawbotStateStore {
@@ -174,6 +209,8 @@ export class WechatClawbotStateStore {
       stringField(input, "event_id", "eventId") ??
       `evt_${safeIdPart(accountId)}_${safeIdPart(peerId)}_${this.state.next_seq}`;
     const now = new Date().toISOString();
+    const messageCreateTimeMs = numberField(input, "message_create_time_ms", "messageCreateTimeMs");
+    const inReplyTo = this.resolveInReplyTo(accountId, peerId, normalizeInReplyTo(input));
     const event: StoredWechatClawbotEvent = {
       seq: this.state.next_seq,
       event_id: eventId,
@@ -183,6 +220,8 @@ export class WechatClawbotStateStore {
       attachments: attachments.length > 0 ? attachments : undefined,
       created_at: now,
       message_id: messageId,
+      message_create_time_ms: messageCreateTimeMs,
+      in_reply_to: inReplyTo,
       peer_name: stringField(input, "peer_name", "peerName"),
     };
 
@@ -206,6 +245,44 @@ export class WechatClawbotStateStore {
     });
     this.save();
     return { event, duplicate: false };
+  }
+
+  private resolveInReplyTo(
+    accountId: string,
+    peerId: string,
+    inReplyTo: StoredWechatClawbotInReplyTo | undefined
+  ): StoredWechatClawbotInReplyTo | undefined {
+    if (!inReplyTo) return undefined;
+    if (inReplyTo.channel_message_id) return inReplyTo;
+
+    const target = this.findUniqueReplyTarget(accountId, peerId, inReplyTo);
+    return {
+      ...inReplyTo,
+      ...(target ? { channel_message_id: target.event_id } : {}),
+    };
+  }
+
+  private findUniqueReplyTarget(
+    accountId: string,
+    peerId: string,
+    inReplyTo: StoredWechatClawbotInReplyTo
+  ): StoredWechatClawbotEvent | undefined {
+    if (!inReplyTo.source_message_id && inReplyTo.source_create_time_ms === undefined) return undefined;
+
+    const candidates = this.state.events.filter((event) => {
+      if (event.account_id !== accountId || event.peer_id !== peerId) return false;
+      if (inReplyTo.source_message_id && event.message_id !== inReplyTo.source_message_id) return false;
+      if (
+        inReplyTo.source_create_time_ms !== undefined &&
+        event.message_create_time_ms !== inReplyTo.source_create_time_ms
+      ) {
+        return false;
+      }
+      if (inReplyTo.text && event.text !== inReplyTo.text) return false;
+      return true;
+    });
+
+    return candidates.length === 1 ? candidates[0] : undefined;
   }
 
   sendText(accountId: string, peerId: string, text: string): StoredWechatClawbotSentMessage {

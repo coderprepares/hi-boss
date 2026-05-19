@@ -323,6 +323,8 @@ export class WechatClawbotSidecarServer {
           event_id: `${account.accountId}:${message.messageId}`,
           text: message.text,
           attachments: message.attachments,
+          message_create_time_ms: message.createTimeMs,
+          in_reply_to: message.inReplyTo,
           context_token_ref: message.contextToken,
         });
         await this.flushPendingOutbound(account, message.fromUserId).catch(() => undefined);

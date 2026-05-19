@@ -440,8 +440,7 @@ and recommended multi-account rollout.
 ## Incoming Flow
 
 1. Sidecar obtains events from mock ingest or iLink `getupdates`.
-2. iLink transport stores `get_updates_buf`, `context_token`, context expiry,
-   and pending outbound messages outside Hi-Boss.
+2. iLink transport stores `get_updates_buf`, `context_token`, context expiry, and pending outbound messages outside Hi-Boss.
 3. Hi-Boss adapter polls `GET /updates`.
 4. Each event becomes a `ChannelMessage`:
    - `platform = "wechat-clawbot"`
@@ -450,8 +449,9 @@ and recommended multi-account rollout.
    - `chat.id = <account-id>/<peer-id>`
    - `content.text = <text>` when present
    - `content.attachments = <downloaded image/file paths>` when present
-5. `ChannelBridge` routes the envelope to the agent bound to the sidecar
-   binding token.
+   - `inReplyTo.text = <quoted text>` when iLink returns quoted content in `ref_msg.message_item`
+   - `inReplyTo.channelMessageId = <event-id>` only when the sidecar uniquely matches the quote to a stored prior event in the same account and peer
+5. `ChannelBridge` routes the envelope to the agent bound to the sidecar binding token.
 
 ## Outgoing Flow
 

@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 import { resolveWechatClawbotIlinkBotToken } from "./config.js";
+import { inReplyToFromItemList, textFromItemList } from "./message-items.js";
 import {
   aesEcbPaddedSize,
   defaultWechatMediaFilename,
@@ -97,23 +98,6 @@ function randomWechatUin(): string {
   return Buffer.from(value).toString("base64");
 }
 
-function textFromItemList(raw: unknown): string | undefined {
-  const items = Array.isArray(raw) ? raw : [];
-  const parts: string[] = [];
-  for (const item of items) {
-    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-    const record = item as Record<string, unknown>;
-    const itemType = stringField(record, "type", "item_type", "itemType")?.toUpperCase();
-    const numericType = numberField(record, "type");
-    const textItem = record.text_item && typeof record.text_item === "object"
-      ? record.text_item as Record<string, unknown>
-      : {};
-    const text = stringField(record, "text", "content") ?? stringField(textItem, "text");
-    if (text && (!itemType || itemType === "TEXT" || numericType === 1)) parts.push(text);
-  }
-  return parts.length > 0 ? parts.join("") : undefined;
-}
-
 function mediaRef(value: unknown): WechatCdnMediaRef | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as WechatCdnMediaRef
@@ -194,6 +178,7 @@ async function normalizeMessages(params: {
     const directText = stringField(message, "text", "content");
     const itemList = message.item_list ?? message.itemList;
     const text = directText ?? textFromItemList(itemList);
+    const inReplyTo = inReplyToFromItemList(itemList);
     if (!messageId || !fromUserId || !contextToken) continue;
     const attachments = await attachmentsFromItemList({
       items: itemList,
@@ -212,6 +197,7 @@ async function normalizeMessages(params: {
       createTimeMs: typeof createTime === "number" ? createTime : undefined,
     };
     if (attachments.length > 0) normalized.attachments = attachments;
+    if (inReplyTo) normalized.inReplyTo = inReplyTo;
     result.push(normalized);
   }
 

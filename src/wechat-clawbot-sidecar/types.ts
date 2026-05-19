@@ -37,7 +37,17 @@ export interface StoredWechatClawbotEvent {
   attachments?: StoredWechatClawbotAttachment[];
   created_at: string;
   message_id?: string;
+  message_create_time_ms?: number;
+  in_reply_to?: StoredWechatClawbotInReplyTo;
   peer_name?: string;
+}
+
+export interface StoredWechatClawbotInReplyTo {
+  channel_message_id?: string;
+  source_message_id?: string;
+  source_create_time_ms?: number;
+  source_type?: string | number;
+  text?: string;
 }
 
 export interface StoredWechatClawbotAttachment {
@@ -117,6 +127,10 @@ export interface IncomingWechatClawbotEvent {
   eventId?: string;
   message_id?: string;
   messageId?: string;
+  message_create_time_ms?: number;
+  messageCreateTimeMs?: number;
+  in_reply_to?: StoredWechatClawbotInReplyTo;
+  inReplyTo?: StoredWechatClawbotInReplyTo;
   peer_name?: string;
   peerName?: string;
   context_token_ref?: string;
@@ -128,6 +142,7 @@ export interface IlinkMessage {
   fromUserId: string;
   text?: string;
   attachments?: StoredWechatClawbotAttachment[];
+  inReplyTo?: StoredWechatClawbotInReplyTo;
   contextToken: string;
   createTimeMs?: number;
 }

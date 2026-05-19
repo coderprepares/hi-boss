@@ -98,10 +98,11 @@ export interface ChannelMessage {
   };
   /**
    * If this message is a reply to (quotes) another message in the same chat,
-   * this contains minimal info about the target message.
+   * this contains minimal info about the target message. Some platforms only
+   * expose quoted text and do not expose a stable quoted message id.
    */
   inReplyTo?: {
-    channelMessageId: string;
+    channelMessageId?: string;
     author?: {
       id: string;
       username?: string;

@@ -126,6 +126,37 @@ test("sidecar deduplicates stable message ids", async () => {
   }
 });
 
+test("sidecar stores quoted text and matches referenced wechat events when unique", async () => {
+  const sidecar = await startSidecar();
+  try {
+    const parent = await fetchJson(`${sidecar.url()}/__mock/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ peer_id: "wxid_boss", message_id: "msg-parent", message_create_time_ms: 1779213000000, text: "quoted text" }),
+    });
+    assert.equal(parent.status, 201);
+
+    const child = await fetchJson(`${sidecar.url()}/__mock/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        peer_id: "wxid_boss",
+        message_id: "msg-child",
+        text: "reply text",
+        in_reply_to: { text: "quoted text", source_message_id: "msg-parent", source_create_time_ms: 1779213000000 },
+      }),
+    });
+    assert.equal(child.status, 201);
+
+    const updates = await fetchJson(`${sidecar.url()}/updates`);
+    assert.equal(updates.body.events.length, 2);
+    assert.equal(updates.body.events[1].in_reply_to.text, "quoted text");
+    assert.equal(updates.body.events[1].in_reply_to.channel_message_id, updates.body.events[0].event_id);
+  } finally {
+    await sidecar.stop();
+  }
+});
+
 test("sidecar accepts mock attachment events without text", async () => {
   const sidecar = await startSidecar();
   try {

@@ -78,6 +78,38 @@ test("wechat-clawbot adapter maps sidecar attachments to ChannelMessage", async 
   }]);
 });
 
+test("wechat-clawbot adapter maps quoted sidecar updates to ChannelMessage", async () => {
+  const fetchImpl = async () => new Response(JSON.stringify({
+    events: [
+      {
+        event_id: "evt-child",
+        account_id: "acct",
+        peer_id: "wxid_boss",
+        text: "reply text",
+        in_reply_to: {
+          channel_message_id: "evt-parent",
+          text: "quoted text",
+        },
+      },
+    ],
+    next_cursor: "cursor-1",
+  }), { status: 200 });
+
+  const adapter = new WechatClawbotAdapter(makeAdapterToken(), { fetchImpl });
+  const messages: ChannelMessage[] = [];
+  adapter.onMessage((message) => {
+    messages.push(message);
+  });
+
+  await adapter.pollOnce();
+
+  assert.equal(messages.length, 1);
+  assert.deepEqual(messages[0].inReplyTo, {
+    channelMessageId: "evt-parent",
+    text: "quoted text",
+  });
+});
+
 test("wechat-clawbot adapter skips existing sidecar events when no stored cursor exists", async () => {
   const savedCursors: string[] = [];
   const requests: string[] = [];

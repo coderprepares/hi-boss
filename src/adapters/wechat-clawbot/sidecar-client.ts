@@ -23,6 +23,7 @@ export interface WechatClawbotSidecarEvent {
   peerId: string;
   text?: string;
   attachments?: Array<{ source: string; filename?: string }>;
+  inReplyTo?: ChannelMessage["inReplyTo"];
   messageId?: string;
   createdAt?: string;
   peerName?: string;
@@ -72,6 +73,35 @@ function objectRecord(value: unknown, label: string): Record<string, unknown> {
     throw new Error(`Invalid ${label}`);
   }
   return value as Record<string, unknown>;
+}
+
+function normalizeInReplyTo(record: Record<string, unknown>): ChannelMessage["inReplyTo"] | undefined {
+  const raw = record.inReplyTo ?? record.in_reply_to;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const reply = raw as Record<string, unknown>;
+  const channelMessageId = stringField(reply, "channelMessageId", "channel_message_id", "messageId", "message_id");
+  const text = stringField(reply, "text");
+  const rawAuthor = reply.author;
+  const author = rawAuthor && typeof rawAuthor === "object" && !Array.isArray(rawAuthor)
+    ? (() => {
+        const authorRecord = rawAuthor as Record<string, unknown>;
+        const id = stringField(authorRecord, "id");
+        const displayName = stringField(authorRecord, "displayName", "display_name");
+        if (!id || !displayName) return undefined;
+        return {
+          id,
+          username: stringField(authorRecord, "username"),
+          displayName,
+        };
+      })()
+    : undefined;
+
+  if (!channelMessageId && !text && !author) return undefined;
+  return {
+    ...(channelMessageId ? { channelMessageId } : {}),
+    ...(author ? { author } : {}),
+    ...(text ? { text } : {}),
+  };
 }
 
 function normalizeBaseUrl(raw: string): string {
@@ -174,6 +204,7 @@ export function normalizeWechatClawbotSidecarEvent(raw: unknown): WechatClawbotS
     peerId,
     text,
     attachments: attachments.length > 0 ? attachments : undefined,
+    inReplyTo: normalizeInReplyTo(record),
     messageId: stringField(record, "messageId", "message_id", "msgId", "msg_id"),
     createdAt: stringField(record, "createdAt", "created_at"),
     peerName: stringField(record, "peerName", "peer_name", "displayName", "display_name"),
@@ -193,6 +224,7 @@ export function buildWechatClawbotChannelMessage(event: WechatClawbotSidecarEven
       id: `${event.accountId}/${event.peerId}`,
       name: event.peerName,
     },
+    ...(event.inReplyTo ? { inReplyTo: event.inReplyTo } : {}),
     content: {
       text: event.text,
       attachments: event.attachments,

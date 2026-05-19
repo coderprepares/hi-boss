@@ -99,6 +99,48 @@ test("iLink client accepts numeric message ids from real iLink updates", async (
   assert.equal(result.messages[0].text, "测试2");
 });
 
+test("iLink client normalizes quoted message text from ref_msg", async () => {
+  const client = new WechatClawbotIlinkClient({
+    apiBaseUrl: "https://ilink.example.test",
+    cdnBaseUrl: "https://cdn.example.test/c2c",
+    mediaDir: tempMediaDir(),
+    requestTimeoutMs: 1000,
+    env: { ILINK_TOKEN: "test-bot-token" },
+    fetchImpl: async () => new Response(JSON.stringify({
+      get_updates_buf: "cursor-2",
+      msgs: [{
+        message_id: "msg-quoted",
+        from_user_id: "wxid_boss",
+        context_token: "context-1",
+        item_list: [{
+          type: 1,
+          text_item: { text: "reply text" },
+          ref_msg: {
+            message_item: {
+              type: 1,
+              create_time_ms: 1779213695215,
+              text_item: { text: "quoted text" },
+            },
+          },
+        }],
+      }],
+    }), { status: 200 }),
+  });
+
+  const result = await client.fetchUpdates({
+    accountId: "acct",
+    botTokenEnv: "ILINK_TOKEN",
+  }, "cursor-1");
+
+  assert.equal(result.messages.length, 1);
+  assert.equal(result.messages[0].text, "reply text");
+  assert.deepEqual(result.messages[0].inReplyTo, {
+    text: "quoted text",
+    source_create_time_ms: 1779213695215,
+    source_type: 1,
+  });
+});
+
 test("iLink client traces raw message field keys without sensitive values", async () => {
   const writes: string[] = [];
   const originalWrite = process.stdout.write;
