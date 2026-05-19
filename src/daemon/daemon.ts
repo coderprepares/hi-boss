@@ -3,7 +3,7 @@ import { HiBossDatabase } from "./db/database.js";
 import { IpcServer } from "./ipc/server.js";
 import { MessageRouter } from "./router/message-router.js";
 import { ChannelBridge } from "./bridges/channel-bridge.js";
-import { AgentExecutor, createAgentExecutor } from "../agent/executor.js";
+import { AgentExecutor, createAgentExecutor, type AgentRunStatusReporter } from "../agent/executor.js";
 import { type BackgroundExecutor, createBackgroundExecutor } from "../agent/background-executor.js";
 import type { Agent } from "../agent/types.js";
 import { EnvelopeScheduler } from "./scheduler/envelope-scheduler.js";
@@ -42,6 +42,7 @@ import {
 import { createChannelCommandHandler } from "./channel-commands.js";
 import { buildMissingAgentRolesGuidance } from "../shared/agent-role.js";
 import { createTelegramRunStatusReporter } from "./telegram-verbose.js";
+import { createWechatTypingRunStatusReporter } from "./wechat-typing.js";
 import {
   getSpeakerBindingIntegrity,
   hasSpeakerBindingIntegrityViolations,
@@ -88,13 +89,38 @@ export class Daemon {
   private httpIngress: HttpIngressBridge | null = null;
   private envelopeRunDebouncer = new EnvelopeRunDebouncer();
   private adapters: Map<string, ChatAdapter> = new Map(); // token -> adapter
-  private createRunStatusReporter = ({ agent, envelopes }: { agent: Agent; envelopes: Envelope[] }) =>
-    createTelegramRunStatusReporter({
-      db: this.db,
-      adapters: this.adapters,
-      agent,
-      envelopes,
-    });
+  private createRunStatusReporter = ({ agent, envelopes }: { agent: Agent; envelopes: Envelope[] }) => {
+    const reporters = [
+      createTelegramRunStatusReporter({
+        db: this.db,
+        adapters: this.adapters,
+        agent,
+        envelopes,
+      }),
+      createWechatTypingRunStatusReporter({
+        db: this.db,
+        adapters: this.adapters,
+        agent,
+        envelopes,
+      }),
+    ].filter((reporter): reporter is AgentRunStatusReporter => Boolean(reporter));
+
+    if (reporters.length === 0) return undefined;
+
+    const combined: AgentRunStatusReporter = {
+      onEvent: async (event) => {
+        for (const reporter of reporters) {
+          await reporter.onEvent?.(event);
+        }
+      },
+      finish: async (result) => {
+        for (const reporter of reporters) {
+          await reporter.finish?.(result);
+        }
+      },
+    };
+    return combined;
+  };
   private running = false;
   private startTimeMs: number | null = null;
   private pidLock: PidLock;

@@ -189,6 +189,46 @@ test("iLink client sends text with context token", async () => {
   assert.equal(requests[0].body.base_info.channel_version, "1.0.3");
 });
 
+test("iLink client gets config and sends typing with ticket", async () => {
+  const requests: Array<{ url: string; body: any }> = [];
+  const client = new WechatClawbotIlinkClient({
+    apiBaseUrl: "https://ilink.example.test/",
+    cdnBaseUrl: "https://cdn.example.test/c2c",
+    mediaDir: tempMediaDir(),
+    requestTimeoutMs: 1000,
+    env: { ILINK_TOKEN: "test-bot-token" },
+    fetchImpl: async (input, init) => {
+      requests.push({
+        url: String(input),
+        body: JSON.parse(String(init?.body ?? "{}")),
+      });
+      return new Response(JSON.stringify({ typing_ticket: "typing-ticket-1" }), { status: 200 });
+    },
+  });
+
+  const config = await client.getConfig(
+    { accountId: "acct", botTokenEnv: "ILINK_TOKEN" },
+    "wxid_boss",
+    "context-1"
+  );
+  await client.sendTyping(
+    { accountId: "acct", botTokenEnv: "ILINK_TOKEN" },
+    "wxid_boss",
+    "typing-ticket-1",
+    1
+  );
+
+  assert.deepEqual(config, { typing_ticket: "typing-ticket-1" });
+  assert.equal(requests[0].url, "https://ilink.example.test/ilink/bot/getconfig");
+  assert.equal(requests[0].body.ilink_user_id, "wxid_boss");
+  assert.equal(requests[0].body.context_token, "context-1");
+  assert.equal(requests[0].body.base_info.channel_version, "1.0.0");
+  assert.equal(requests[1].url, "https://ilink.example.test/ilink/bot/sendtyping");
+  assert.equal(requests[1].body.ilink_user_id, "wxid_boss");
+  assert.equal(requests[1].body.typing_ticket, "typing-ticket-1");
+  assert.equal(requests[1].body.status, 1);
+});
+
 test("iLink client uploads and sends outbound image and file attachments", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wechat-clawbot-outbound-"));
   const imagePath = path.join(dir, "image.jpg");

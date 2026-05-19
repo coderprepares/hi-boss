@@ -39,6 +39,14 @@ export interface WechatClawbotTarget {
   peerId: string;
 }
 
+export interface WechatClawbotConfigResult {
+  ok?: boolean;
+  accountId?: string;
+  peerId?: string;
+  config: unknown;
+  raw: unknown;
+}
+
 export interface WechatClawbotSidecarClientOptions {
   config: WechatClawbotAdapterConfig;
   fetchImpl?: FetchLike;
@@ -244,6 +252,34 @@ export class WechatClawbotSidecarClient {
     });
   }
 
+  async getConfig(target: WechatClawbotTarget): Promise<WechatClawbotConfigResult> {
+    const url = new URL(
+      `${this.options.config.baseUrl}/accounts/${encodeURIComponent(target.accountId)}` +
+      `/peers/${encodeURIComponent(target.peerId)}/config`
+    );
+    const data = await this.fetchJson(url, { method: "GET" });
+    const record = objectRecord(data, "wechat-clawbot config response");
+    return {
+      ok: record.ok === true,
+      accountId: stringField(record, "accountId", "account_id"),
+      peerId: stringField(record, "peerId", "peer_id"),
+      config: "config" in record ? record.config : record,
+      raw: data,
+    };
+  }
+
+  async sendTyping(target: WechatClawbotTarget, status: 1 | 2 = 1): Promise<void> {
+    const url = new URL(
+      `${this.options.config.baseUrl}/accounts/${encodeURIComponent(target.accountId)}` +
+      `/peers/${encodeURIComponent(target.peerId)}/typing`
+    );
+    await this.fetchJson(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+  }
+
   private async fetchJson(url: URL, init: RequestInit): Promise<unknown> {
     const token = resolveWechatClawbotApiToken(this.options.config, this.env);
     const headers = new Headers(init.headers);
@@ -258,7 +294,19 @@ export class WechatClawbotSidecarClient {
         signal: controller.signal,
       });
       if (!response.ok) {
-        throw new Error(`wechat-clawbot sidecar HTTP ${response.status}`);
+        const body = await response.text().catch(() => "");
+        let message = body.trim();
+        try {
+          const parsed = JSON.parse(body) as Record<string, unknown>;
+          message = stringField(parsed, "message", "error") ?? message;
+        } catch {
+          // Keep plain response text.
+        }
+        throw new Error(
+          message
+            ? `wechat-clawbot sidecar HTTP ${response.status}: ${message}`
+            : `wechat-clawbot sidecar HTTP ${response.status}`
+        );
       }
       return await response.json();
     } finally {

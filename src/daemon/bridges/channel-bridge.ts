@@ -108,6 +108,11 @@ export class ChannelBridge {
       agentName: laneResolution.agentName,
     };
 
+    const adapterResponse = await adapter.handleCommand?.(enrichedCommand);
+    if (adapterResponse) {
+      return adapterResponse;
+    }
+
     if (this.commandHandler) {
       return await this.commandHandler(enrichedCommand);
     }

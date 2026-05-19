@@ -276,6 +276,53 @@ test("wechat-clawbot adapter recognizes help slash command", async () => {
   assert.deepEqual(posts[0].body, { text: "wechat-clawbot:help:" });
 });
 
+test("wechat-clawbot adapter recognizes getconfig slash command", async () => {
+  const posts: Array<{ body: unknown }> = [];
+  const fetchImpl = async (_input: string | URL, init?: RequestInit) => {
+    if ((init?.method ?? "GET") === "POST") {
+      posts.push({ body: JSON.parse(String(init?.body ?? "{}")) });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }
+    return new Response(JSON.stringify({
+      events: [{ event_id: "evt-config", account_id: "acct", peer_id: "wxid_boss", text: "/getconfig" }],
+    }), { status: 200 });
+  };
+
+  const adapter = new WechatClawbotAdapter(makeAdapterToken(), { fetchImpl });
+  adapter.onCommand((command) => ({ text: `${command.platform}:${command.command}:${command.args}` }));
+
+  await adapter.pollOnce();
+
+  assert.equal(posts.length, 1);
+  assert.deepEqual(posts[0].body, { text: "wechat-clawbot:getconfig:" });
+});
+
+test("wechat-clawbot adapter handles getconfig through sidecar", async () => {
+  const requests: string[] = [];
+  const fetchImpl = async (input: string | URL) => {
+    requests.push(String(input));
+    return new Response(JSON.stringify({
+      ok: true,
+      account_id: "acct",
+      peer_id: "wxid_boss",
+      config: { typing_ticket: "typing-ticket-1" },
+    }), { status: 200 });
+  };
+
+  const adapter = new WechatClawbotAdapter(makeAdapterToken(), { fetchImpl });
+  const response = await adapter.handleCommand({
+    platform: "wechat-clawbot",
+    command: "getconfig",
+    args: "",
+    chatId: "acct/wxid_boss",
+    authorId: "wxid_boss",
+  });
+
+  assert.deepEqual(requests, ["http://sidecar.local/accounts/acct/peers/wxid_boss/config"]);
+  assert.equal(response?.text?.includes("wechat-clawbot getconfig:"), true);
+  assert.equal(response?.text?.includes("\"typing_ticket\": \"typing-ticket-1\""), true);
+});
+
 test("wechat-clawbot adapter token rejects inline secrets", () => {
   assert.throws(
     () => parseWechatClawbotAdapterToken(JSON.stringify({

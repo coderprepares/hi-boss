@@ -68,6 +68,20 @@ function routeSendMessage(parts: string[]): { accountId: string; peerId: string 
   return { accountId: parts[1], peerId: parts[3] };
 }
 
+function routePeerAction(parts: string[], action: string): { accountId: string; peerId: string } | undefined {
+  if (parts.length !== 5) return undefined;
+  if (parts[0] !== "accounts" || parts[2] !== "peers" || parts[4] !== action) return undefined;
+  return { accountId: parts[1], peerId: parts[3] };
+}
+
+function stringField(record: Record<string, unknown>, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -115,6 +129,7 @@ export class WechatClawbotSidecarServer {
   private lastPollError?: string;
   private pollInFlight = false;
   private pollConsecutiveFailures = 0;
+  private typingTickets = new Map<string, { ticket: string; updatedAtMs: number }>();
 
   constructor(
     private config: WechatClawbotSidecarConfig,
@@ -234,6 +249,27 @@ export class WechatClawbotSidecarServer {
       return;
     }
 
+    const configTarget = routePeerAction(parts, "config");
+    if (req.method === "GET" && configTarget) {
+      const result = await this.getConfig(configTarget.accountId, configTarget.peerId);
+      json(res, 200, {
+        ok: true,
+        account_id: configTarget.accountId,
+        peer_id: configTarget.peerId,
+        config: result.config,
+      });
+      return;
+    }
+
+    const typingTarget = routePeerAction(parts, "typing");
+    if (req.method === "POST" && typingTarget) {
+      const body = await readJsonBody(req);
+      const status = body.status === 2 ? 2 : 1;
+      await this.sendTyping(typingTarget.accountId, typingTarget.peerId, status);
+      json(res, 200, { ok: true });
+      return;
+    }
+
     throw new SidecarHttpError(404, "not-found", "not found");
   }
 
@@ -339,6 +375,61 @@ export class WechatClawbotSidecarServer {
       );
     }
     return this.store.recordSentText(accountId, peerId, contentSummary(trimmed, attachments));
+  }
+
+  private accountById(accountId: string): WechatClawbotIlinkAccountConfig {
+    const account = this.config.ilinkAccounts.find((item) => item.accountId === accountId);
+    if (!account) throw new SidecarHttpError(404, "account-not-found", "iLink account not found");
+    return account;
+  }
+
+  private getRequiredContextToken(accountId: string, peerId: string): string {
+    const contextToken = this.store.getPeerContextToken(accountId, peerId);
+    if (!contextToken) {
+      throw new SidecarHttpError(
+        409,
+        "missing-context-token",
+        "peer has no active context token; have the peer send one test message first"
+      );
+    }
+    return contextToken;
+  }
+
+  private async getConfig(
+    accountId: string,
+    peerId: string
+  ): Promise<{ config: unknown; typingTicket?: string }> {
+    if (!this.ilink) {
+      throw new SidecarHttpError(501, "unsupported-transport", "getconfig requires ilink transport");
+    }
+    const account = this.accountById(accountId);
+    const contextToken = this.getRequiredContextToken(accountId, peerId);
+    const config = await this.ilink.getConfig(account, peerId, contextToken);
+    const record = config && typeof config === "object" && !Array.isArray(config)
+      ? config as Record<string, unknown>
+      : {};
+    const typingTicket = stringField(record, "typing_ticket", "typingTicket");
+    if (typingTicket) {
+      this.typingTickets.set(`${accountId}/${peerId}`, { ticket: typingTicket, updatedAtMs: Date.now() });
+    }
+    return { config, typingTicket };
+  }
+
+  private async sendTyping(accountId: string, peerId: string, status: 1 | 2): Promise<void> {
+    if (!this.ilink) {
+      throw new SidecarHttpError(501, "unsupported-transport", "typing requires ilink transport");
+    }
+    const account = this.accountById(accountId);
+    const cacheKey = `${accountId}/${peerId}`;
+    let ticket = this.typingTickets.get(cacheKey)?.ticket;
+    if (!ticket) {
+      const result = await this.getConfig(accountId, peerId);
+      ticket = result.typingTicket;
+    }
+    if (!ticket) {
+      throw new SidecarHttpError(502, "typing-ticket-missing", "iLink getconfig response missing typing_ticket");
+    }
+    await this.ilink.sendTyping(account, peerId, ticket, status);
   }
 
   private async flushPendingOutbound(account: WechatClawbotIlinkAccountConfig, peerId: string): Promise<void> {

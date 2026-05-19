@@ -24,7 +24,7 @@ MVP scope:
 - Stable boss identification by sidecar peer id.
 - No real WeChat credentials in Hi-Boss DB, envelopes, logs, or prompts.
 
-Out of scope for MVP: voice, video, stickers, reactions, typing indicators, bulk/group automation,
+Out of scope for MVP: voice, video, stickers, reactions, bulk/group automation,
 payment, transfers, red packets, contacts scraping, friend automation, and public webhooks directly to Hi-Boss.
 
 ## Sidecar Contract
@@ -486,6 +486,7 @@ commands from the sidecar:
 - `/status <agent-name>`
 - `/abort [agent-name]`
 - `/help`
+- `/getconfig`
 Commands are handled as boss-only by `ChannelBridge`.
 
 ## Security Notes

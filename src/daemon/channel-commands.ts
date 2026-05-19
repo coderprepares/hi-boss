@@ -70,6 +70,9 @@ function buildChannelHelpText(platform: string | undefined): string {
     lines.push("/verbose - show verbose mode");
     lines.push("/verbose on|off - toggle runtime status updates");
   }
+  if (platform === "wechat-clawbot") {
+    lines.push("/getconfig - show raw iLink getconfig response for this chat");
+  }
   lines.push("Commands are boss-only.");
   return lines.join("\n");
 }

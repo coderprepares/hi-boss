@@ -159,7 +159,9 @@ export interface ChatAdapter {
   sendMessage(chatId: string, content: MessageContent, options?: SendMessageOptions): Promise<void>;
   onMessage(handler: ChannelMessageHandler): void;
   onCommand?(handler: ChannelCommandHandler): void;
+  handleCommand?(command: ChannelCommand): Promise<MessageContent | void>;
   setReaction?(chatId: string, messageId: string, emoji: string): Promise<void>;
+  createTypingIndicator?(chatId: string): { start(): void; stop(): void };
   start(): Promise<void>;
   stop(): Promise<void>;
 }

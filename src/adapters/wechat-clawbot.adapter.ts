@@ -16,6 +16,7 @@ import {
   type WechatClawbotAdapterConfig,
   type WechatClawbotSidecarEvent,
 } from "./wechat-clawbot/sidecar-client.js";
+import { WechatClawbotTypingIndicator } from "./wechat-clawbot/typing-indicator.js";
 
 export interface WechatClawbotAdapterOptions {
   fetchImpl?: FetchLike;
@@ -34,7 +35,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function parseSlashCommand(event: WechatClawbotSidecarEvent): ChannelCommand | undefined {
-  const match = event.text?.match(/^\/(new|status|abort|help)(?:\s+(.*))?$/i);
+  const match = event.text?.match(/^\/(new|status|abort|help|getconfig)(?:\s+(.*))?$/i);
   if (!match) return undefined;
 
   return {
@@ -85,6 +86,32 @@ export class WechatClawbotAdapter implements ChatAdapter {
   async sendMessage(chatId: string, content: MessageContent, _options: SendMessageOptions = {}): Promise<void> {
     const target = parseWechatClawbotChatId(chatId, this.config.defaultAccount);
     await this.client.sendText(target, content);
+  }
+
+  async handleCommand(command: ChannelCommand): Promise<MessageContent | void> {
+    if (command.command !== "getconfig") return;
+    if (command.args.trim()) {
+      return { text: "error: usage /getconfig" };
+    }
+
+    const target = parseWechatClawbotChatId(command.chatId, this.config.defaultAccount);
+    let result: Awaited<ReturnType<WechatClawbotSidecarClient["getConfig"]>>;
+    try {
+      result = await this.client.getConfig(target);
+    } catch (err) {
+      return { text: `error: ${err instanceof Error ? err.message : String(err)}` };
+    }
+    return {
+      text: [
+        "wechat-clawbot getconfig:",
+        JSON.stringify(result.config, null, 2),
+      ].join("\n"),
+    };
+  }
+
+  createTypingIndicator(chatId: string): WechatClawbotTypingIndicator {
+    const target = parseWechatClawbotChatId(chatId, this.config.defaultAccount);
+    return new WechatClawbotTypingIndicator(this.client, target);
   }
 
   async pollOnce(): Promise<void> {

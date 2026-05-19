@@ -267,6 +267,60 @@ test("sidecar status records the most recent iLink poll error", async () => {
   }
 });
 
+test("sidecar exposes iLink getconfig and sends typing with cached ticket", async () => {
+  const tokenFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "wechat-clawbot-ilink-token-")), "token");
+  fs.writeFileSync(tokenFile, "bot-token\n", { mode: 0o600 });
+  const requests: Array<{ url: string; body: any }> = [];
+  const sidecar = await startSidecar({
+    transport: "ilink",
+    pollIntervalMs: 60_000,
+    ilinkAccounts: [{ accountId: "acct", botTokenFile: tokenFile }],
+  }, undefined, (async (input, init) => {
+    const url = String(input);
+    const body = JSON.parse(String(init?.body ?? "{}"));
+    requests.push({ url, body });
+    if (url.endsWith("/ilink/bot/getconfig")) {
+      return new Response(JSON.stringify({ typing_ticket: "typing-ticket-1", mode: "test" }), { status: 200 });
+    }
+    if (url.endsWith("/ilink/bot/sendtyping")) {
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ get_updates_buf: "" }), { status: 200 });
+  }) as typeof fetch);
+  try {
+    await fetchJson(`${sidecar.url()}/__mock/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        peer_id: "wxid_boss",
+        message_id: "msg-config",
+        text: "hello",
+        context_token_ref: "context-1",
+      }),
+    });
+
+    const config = await fetchJson(`${sidecar.url()}/accounts/acct/peers/wxid_boss/config`);
+    assert.equal(config.status, 200);
+    assert.deepEqual(config.body.config, { typing_ticket: "typing-ticket-1", mode: "test" });
+
+    const typing = await fetchJson(`${sidecar.url()}/accounts/acct/peers/wxid_boss/typing`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: 1 }),
+    });
+    assert.equal(typing.status, 200);
+
+    assert.equal(requests[0].url, "https://ilink.example.test/ilink/bot/getconfig");
+    assert.equal(requests[0].body.ilink_user_id, "wxid_boss");
+    assert.equal(requests[0].body.context_token, "context-1");
+    assert.equal(requests[1].url, "https://ilink.example.test/ilink/bot/sendtyping");
+    assert.equal(requests[1].body.typing_ticket, "typing-ticket-1");
+    assert.equal(requests[1].body.status, 1);
+  } finally {
+    await sidecar.stop();
+  }
+});
+
 test("sidecar iLink transport polls updates and sends through context token", async () => {
   const requests: Array<{ url: string; body: any }> = [];
   const ilinkFetchImpl: typeof fetch = async (input, init) => {

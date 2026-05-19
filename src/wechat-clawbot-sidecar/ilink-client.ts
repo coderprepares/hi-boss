@@ -256,6 +256,36 @@ export class WechatClawbotIlinkClient {
     await this.sendMessage(account, peerId, contextToken, { text });
   }
 
+  async getConfig(
+    account: WechatClawbotIlinkAccountConfig,
+    peerId: string,
+    contextToken: string
+  ): Promise<unknown> {
+    return await this.post(account, "/ilink/bot/getconfig", {
+      ilink_user_id: peerId,
+      context_token: contextToken,
+      base_info: {
+        channel_version: "1.0.0",
+      },
+    });
+  }
+
+  async sendTyping(
+    account: WechatClawbotIlinkAccountConfig,
+    peerId: string,
+    typingTicket: string,
+    status: 1 | 2
+  ): Promise<void> {
+    await this.post(account, "/ilink/bot/sendtyping", {
+      ilink_user_id: peerId,
+      typing_ticket: typingTicket,
+      status,
+      base_info: {
+        channel_version: "1.0.0",
+      },
+    });
+  }
+
   async sendMessage(
     account: WechatClawbotIlinkAccountConfig,
     peerId: string,
