@@ -358,6 +358,8 @@ Sidecar operations are documented in `docs/spec/adapters/wechat-clawbot-operatio
 - `events:`
 - `next-cursor:`
 - `pending-outbox:`
+- `sent-messages:`
+- `last-sent-at:`
 - `context-active:`
 - `context-expiring-soon:`
 - `context-expired:`

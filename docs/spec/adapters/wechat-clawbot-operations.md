@@ -56,6 +56,8 @@ peers: 1
 events: 9
 next-cursor: 9
 pending-outbox: 0
+sent-messages: 3
+last-sent-at: 2026-05-19T13:28:45.000Z
 context-active: 1
 context-expiring-soon: 0
 context-expired: 0
@@ -106,8 +108,8 @@ After deploying sidecar code:
 2. Restart the sidecar process itself if `/status` or sidecar runtime code changed.
 3. Run the doctor command.
 4. Send one real channel message through `hiboss envelope send` when the reply
-   context is active, then confirm `pending-outbox: 0` and `sent_messages`
-   increments in `/status`.
+   context is active, then confirm `pending-outbox: 0` and `sent-messages:`
+   increments in doctor output.
 
 For the current PM2-style deployment, restart the sidecar process with:
 

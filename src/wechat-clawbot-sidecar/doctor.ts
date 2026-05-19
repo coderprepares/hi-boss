@@ -22,6 +22,8 @@ export interface WechatClawbotDoctorSummary {
   events?: number;
   nextCursor?: string;
   pendingOutbox?: number;
+  sentMessages?: number;
+  lastSentAt?: string;
   contextActive?: number;
   contextExpiringSoon?: number;
   contextExpired?: number;
@@ -308,6 +310,8 @@ export async function runWechatClawbotDoctor(options: WechatClawbotDoctorOptions
   summary.events = numberField(state, "events");
   summary.nextCursor = stringField(state, "next_cursor");
   summary.pendingOutbox = numberField(state, "pending_outbox");
+  summary.sentMessages = numberField(state, "sent_messages");
+  summary.lastSentAt = stringField(objectRecord(state?.last_sent), "created_at");
   summary.contextActive = numberField(state, "context_active");
   summary.contextExpiringSoon = numberField(state, "context_expiring_soon");
   summary.contextExpired = numberField(state, "context_expired");
@@ -383,6 +387,8 @@ export function formatWechatClawbotDoctorResult(result: WechatClawbotDoctorResul
     `events: ${valueOrNone(result.summary.events)}`,
     `next-cursor: ${valueOrNone(result.summary.nextCursor)}`,
     `pending-outbox: ${valueOrNone(result.summary.pendingOutbox)}`,
+    `sent-messages: ${valueOrNone(result.summary.sentMessages)}`,
+    `last-sent-at: ${valueOrNone(result.summary.lastSentAt)}`,
     `context-active: ${valueOrNone(result.summary.contextActive)}`,
     `context-expiring-soon: ${valueOrNone(result.summary.contextExpiringSoon)}`,
     `context-expired: ${valueOrNone(result.summary.contextExpired)}`,

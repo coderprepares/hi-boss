@@ -94,6 +94,8 @@ function healthyFetch(nextCursor = "9"): FetchLike {
         events: 9,
         next_cursor: nextCursor,
         pending_outbox: 0,
+        sent_messages: 3,
+        last_sent: { created_at: "2026-05-19T13:28:45.000Z" },
         context_active: 1,
         context_expiring_soon: 0,
         context_expired: 0,
@@ -129,6 +131,8 @@ test("wechat sidecar doctor reports ok for healthy status", async () => {
           events: 9,
           next_cursor: "9",
           pending_outbox: 0,
+          sent_messages: 3,
+          last_sent: { created_at: "2026-05-19T13:28:45.000Z" },
           context_active: 1,
           context_expiring_soon: 0,
           context_expired: 0,
@@ -150,7 +154,10 @@ test("wechat sidecar doctor reports ok for healthy status", async () => {
   assert.equal(result.ok, true);
   assert.equal(result.status, "ok");
   assert.deepEqual(result.issues, []);
-  assert.match(formatWechatClawbotDoctorResult(result), /pending-outbox: 0/);
+  const output = formatWechatClawbotDoctorResult(result);
+  assert.match(output, /pending-outbox: 0/);
+  assert.match(output, /sent-messages: 3/);
+  assert.match(output, /last-sent-at: 2026-05-19T13:28:45.000Z/);
 });
 
 test("wechat sidecar doctor can include healthy local hiboss state", async (t) => {
