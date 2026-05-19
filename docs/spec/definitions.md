@@ -367,6 +367,8 @@ Sidecar operations are documented in `docs/spec/adapters/wechat-clawbot-operatio
 - `ilink-poll-enabled:`
 - `ilink-poll-last-started-at:`
 - `ilink-poll-last-completed-at:`
+- `ilink-poll-last-completed-age-seconds:`
+- `ilink-poll-max-age-seconds:`
 - `ilink-poll-last-error-at:`
 - `ilink-poll-last-error:`
 - `hiboss-dir:`

@@ -116,6 +116,7 @@ test("wechat sidecar doctor reports ok for healthy status", async () => {
   const seen: string[] = [];
   const result = await runWechatClawbotDoctor({
     config: baseConfig,
+    nowMs: Date.parse("2026-05-19T12:57:10.000Z"),
     fetchImpl: async (input) => {
       seen.push(String(input));
       if (String(input).endsWith("/healthz")) {
@@ -158,6 +159,7 @@ test("wechat sidecar doctor reports ok for healthy status", async () => {
   assert.match(output, /pending-outbox: 0/);
   assert.match(output, /sent-messages: 3/);
   assert.match(output, /last-sent-at: 2026-05-19T13:28:45.000Z/);
+  assert.match(output, /ilink-poll-last-completed-age-seconds: 2/);
 });
 
 test("wechat sidecar doctor can include healthy local hiboss state", async (t) => {
@@ -171,6 +173,7 @@ test("wechat sidecar doctor can include healthy local hiboss state", async (t) =
     config: baseConfig,
     hibossDir,
     agentName: "nex",
+    nowMs: Date.parse("2026-05-19T12:57:10.000Z"),
     fetchImpl: healthyFetch("9"),
   });
 
@@ -198,6 +201,7 @@ test("wechat sidecar doctor warns for missing local hiboss binding and cursor la
     config: baseConfig,
     hibossDir,
     agentName: "nex",
+    nowMs: Date.parse("2026-05-19T12:57:10.000Z"),
     fetchImpl: healthyFetch("9"),
   });
 
@@ -260,6 +264,45 @@ test("wechat sidecar doctor warns for queued outbox and poll errors", async () =
   const output = formatWechatClawbotDoctorResult(result);
   assert.match(output, /issue-count: 5/);
   assert.match(output, /issue-4-message: iLink HTTP 500/);
+});
+
+test("wechat sidecar doctor warns when iLink polling completion is stale", async () => {
+  const result = await runWechatClawbotDoctor({
+    config: baseConfig,
+    nowMs: Date.parse("2026-05-19T14:02:01.000Z"),
+    fetchImpl: async (input) => {
+      if (String(input).endsWith("/healthz")) {
+        return jsonResponse({ ok: true, service: "wechat-clawbot-sidecar", transport: "ilink" });
+      }
+      return jsonResponse({
+        ok: true,
+        service: "wechat-clawbot-sidecar",
+        transport: "ilink",
+        state: {
+          accounts: 1,
+          peers: 1,
+          events: 9,
+          next_cursor: "9",
+          pending_outbox: 0,
+          context_active: 1,
+          context_expiring_soon: 0,
+          context_expired: 0,
+        },
+        ilink_poll: {
+          enabled: true,
+          last_started_at: "2026-05-19T14:00:00.000Z",
+          last_completed_at: "2026-05-19T14:00:00.000Z",
+        },
+      });
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, "warn");
+  assert.equal(result.summary.ilinkPollLastCompletedAgeSeconds, 121);
+  assert.equal(result.summary.ilinkPollMaxAgeSeconds, 60);
+  assert.deepEqual(result.issues.map((issue) => issue.name), ["ilink-poll-stale"]);
+  assert.match(formatWechatClawbotDoctorResult(result), /issue-1-name: ilink-poll-stale/);
 });
 
 test("wechat sidecar doctor errors when status leaks sensitive fields", async () => {

@@ -31,6 +31,8 @@ export interface WechatClawbotDoctorSummary {
   ilinkPollEnabled?: boolean;
   ilinkPollLastStartedAt?: string;
   ilinkPollLastCompletedAt?: string;
+  ilinkPollLastCompletedAgeSeconds?: number;
+  ilinkPollMaxAgeSeconds?: number;
   ilinkPollLastErrorAt?: string;
   ilinkPollLastError?: string;
   hibossDir?: string;
@@ -60,6 +62,7 @@ export interface WechatClawbotDoctorOptions {
   config: WechatClawbotSidecarConfig;
   hibossDir?: string;
   agentName?: string;
+  nowMs?: number;
   fetchImpl?: FetchLike;
 }
 
@@ -145,6 +148,13 @@ function maxNumericString(values: string[]): string | undefined {
     .map((value) => BigInt(value));
   if (numeric.length === 0) return undefined;
   return numeric.reduce((max, value) => value > max ? value : max, numeric[0]).toString();
+}
+
+function ageSecondsSince(isoTimestamp: string | undefined, nowMs: number): number | undefined {
+  if (!isoTimestamp) return undefined;
+  const timestampMs = Date.parse(isoTimestamp);
+  if (!Number.isFinite(timestampMs)) return undefined;
+  return Math.max(0, Math.floor((nowMs - timestampMs) / 1000));
 }
 
 function countRecentWechatPollFailures(logPath: string): number | undefined {
@@ -270,6 +280,7 @@ function inspectHibossLocalState(params: {
 export async function runWechatClawbotDoctor(options: WechatClawbotDoctorOptions): Promise<WechatClawbotDoctorResult> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const sidecarUrl = getWechatClawbotSidecarBaseUrl(options.config);
+  const nowMs = options.nowMs ?? Date.now();
   const issues: WechatClawbotDoctorIssue[] = [];
   const summary: WechatClawbotDoctorSummary = {};
 
@@ -321,6 +332,8 @@ export async function runWechatClawbotDoctor(options: WechatClawbotDoctorOptions
   summary.ilinkPollEnabled = boolField(ilinkPoll, "enabled");
   summary.ilinkPollLastStartedAt = stringField(ilinkPoll, "last_started_at");
   summary.ilinkPollLastCompletedAt = stringField(ilinkPoll, "last_completed_at");
+  summary.ilinkPollLastCompletedAgeSeconds = ageSecondsSince(summary.ilinkPollLastCompletedAt, nowMs);
+  summary.ilinkPollMaxAgeSeconds = Math.ceil(Math.max(options.config.pollIntervalMs * 10, 60_000) / 1000);
   summary.ilinkPollLastErrorAt = stringField(ilinkPoll, "last_error_at");
   summary.ilinkPollLastError = stringField(ilinkPoll, "last_error");
 
@@ -347,6 +360,18 @@ export async function runWechatClawbotDoctor(options: WechatClawbotDoctorOptions
   }
   if (summary.ilinkPollEnabled && !summary.ilinkPollLastStartedAt) {
     addIssue(issues, "warning", "ilink-poll-not-started", "iLink polling is enabled but has not started yet");
+  }
+  if (
+    summary.ilinkPollEnabled &&
+    summary.ilinkPollLastCompletedAgeSeconds !== undefined &&
+    summary.ilinkPollLastCompletedAgeSeconds > summary.ilinkPollMaxAgeSeconds
+  ) {
+    addIssue(
+      issues,
+      "warning",
+      "ilink-poll-stale",
+      `iLink polling has not completed for ${summary.ilinkPollLastCompletedAgeSeconds}s`
+    );
   }
   if (options.hibossDir) {
     inspectHibossLocalState({
@@ -396,6 +421,8 @@ export function formatWechatClawbotDoctorResult(result: WechatClawbotDoctorResul
     `ilink-poll-enabled: ${valueOrNone(result.summary.ilinkPollEnabled)}`,
     `ilink-poll-last-started-at: ${valueOrNone(result.summary.ilinkPollLastStartedAt)}`,
     `ilink-poll-last-completed-at: ${valueOrNone(result.summary.ilinkPollLastCompletedAt)}`,
+    `ilink-poll-last-completed-age-seconds: ${valueOrNone(result.summary.ilinkPollLastCompletedAgeSeconds)}`,
+    `ilink-poll-max-age-seconds: ${valueOrNone(result.summary.ilinkPollMaxAgeSeconds)}`,
     `ilink-poll-last-error-at: ${valueOrNone(result.summary.ilinkPollLastErrorAt)}`,
     `ilink-poll-last-error: ${valueOrNone(result.summary.ilinkPollLastError)}`,
     `hiboss-dir: ${valueOrNone(result.summary.hibossDir)}`,
