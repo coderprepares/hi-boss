@@ -56,8 +56,11 @@ function fetchWithPendingOutbox(pendingOutbox: number): FetchLike {
       },
       ilink_poll: {
         enabled: true,
+        in_flight: false,
         last_started_at: "2026-05-19T12:57:09.380Z",
         last_completed_at: "2026-05-19T12:57:10.380Z",
+        last_duration_ms: 456,
+        consecutive_failures: 0,
       },
     });
   };
@@ -109,7 +112,10 @@ test("wechat sidecar monitor sends notification when doctor has issues", async (
   assert.equal(result.notified, true);
   assert.equal(result.envelopeId, "12345678");
   assert.match(notifiedText, /pending-outbox: 2/);
+  assert.match(notifiedText, /ilink-poll-last-duration-ms: 456/);
+  assert.match(notifiedText, /ilink-poll-consecutive-failures: 0/);
   assert.match(formatWechatClawbotMonitorResult(result), /envelope-id: 12345678/);
+  assert.match(formatWechatClawbotMonitorResult(result), /ilink-poll-last-duration-ms: 456/);
   delete process.env.HIBOSS_MONITOR_TOKEN;
 });
 

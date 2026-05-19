@@ -172,6 +172,10 @@ notification-error: (none)
 pending-outbox: 0
 sent-messages: 25
 last-sent-at: 2026-05-19T13:38:54.551Z
+ilink-poll-in-flight: true|false|(none)
+ilink-poll-current-duration-ms: 0
+ilink-poll-last-duration-ms: 123
+ilink-poll-consecutive-failures: 0
 hiboss-cursor-matches-sidecar: true
 hiboss-recent-wechat-poll-failures: 0
 issue-count: 0

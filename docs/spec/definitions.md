@@ -411,6 +411,10 @@ Sidecar operations are documented in `docs/spec/adapters/wechat-clawbot-operatio
 - `pending-outbox:`
 - `sent-messages:`
 - `last-sent-at:`
+- `ilink-poll-in-flight:`
+- `ilink-poll-current-duration-ms:`
+- `ilink-poll-last-duration-ms:`
+- `ilink-poll-consecutive-failures:`
 - `hiboss-cursor-matches-sidecar:`
 - `hiboss-recent-wechat-poll-failures:`
 - `issue-count:`

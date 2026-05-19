@@ -11,6 +11,9 @@ import {
   type WechatClawbotDoctorOptions,
   type WechatClawbotDoctorResult,
 } from "./doctor.js";
+import { buildWechatClawbotMonitorAlertText } from "./monitor-format.js";
+
+export { formatWechatClawbotMonitorResult, formatWechatClawbotMonitorStatusResult } from "./monitor-format.js";
 
 export interface WechatClawbotMonitorCliOptions {
   hibossDir?: string;
@@ -89,10 +92,6 @@ const DEFAULT_CRON_FILE = "/etc/cron.d/hiboss-wechat-clawbot-monitor";
 const DEFAULT_LOG_FILE = "/var/log/hiboss-wechat-clawbot-monitor.log";
 const DEFAULT_MONITOR_STATUS_MAX_AGE_MINUTES = 15;
 
-function valueOrNone(value: unknown): string {
-  return value === undefined || value === null || value === "" ? "(none)" : String(value);
-}
-
 function parseNonNegativeInt(value: string | undefined, label: string): number {
   if (!value || !/^\d+$/.test(value)) throw new Error(`${label} requires a non-negative integer`);
   const parsed = Number(value);
@@ -163,22 +162,6 @@ function alertFingerprint(doctor: WechatClawbotDoctorResult): string {
     status: doctor.status,
     issues: doctor.issues.map((issue) => [issue.level, issue.name, issue.message]),
   });
-}
-
-function buildAlertText(doctor: WechatClawbotDoctorResult): string {
-  const lines = [
-    `Hi-Boss WeChat monitor: ${doctor.status}`,
-    `pending-outbox: ${valueOrNone(doctor.summary.pendingOutbox)}`,
-    `sent-messages: ${valueOrNone(doctor.summary.sentMessages)}`,
-    `last-sent-at: ${valueOrNone(doctor.summary.lastSentAt)}`,
-    `hiboss-cursor-matches-sidecar: ${valueOrNone(doctor.summary.hibossCursorMatchesSidecar)}`,
-    `hiboss-recent-wechat-poll-failures: ${valueOrNone(doctor.summary.hibossRecentWechatPollFailures)}`,
-    `issue-count: ${doctor.issues.length}`,
-  ];
-  doctor.issues.forEach((issue, index) => {
-    lines.push(`issue-${index + 1}: ${issue.level} ${issue.name} - ${issue.message}`);
-  });
-  return lines.join("\n");
 }
 
 function readAgentTokenFromDb(hibossDir: string | undefined, agentName: string | undefined): string | undefined {
@@ -293,7 +276,7 @@ export async function runWechatClawbotMonitor(options: WechatClawbotMonitorOptio
     const token = resolveNotifyToken(options);
     if (!token) throw new Error("Notification token is not configured");
     const notify = options.notifyImpl ?? sendEnvelopeViaIpc;
-    const sent = await notify({ token, to: options.notifyTo, text: buildAlertText(doctor), hibossDir: options.hibossDir });
+    const sent = await notify({ token, to: options.notifyTo, text: buildWechatClawbotMonitorAlertText(doctor), hibossDir: options.hibossDir });
     writeCooldown(cooldownFile, { fingerprint, notifiedAt: nowMs });
     return {
       ok: false,
@@ -321,37 +304,6 @@ export async function runWechatClawbotMonitor(options: WechatClawbotMonitorOptio
       notificationError: err instanceof Error ? err.message : String(err),
     };
   }
-}
-
-export function formatWechatClawbotMonitorResult(result: WechatClawbotMonitorResult): string {
-  const lines = [
-    `ok: ${result.ok ? "true" : "false"}`,
-    `run-at: ${result.runAt}`,
-    `monitor-status: ${result.monitorStatus}`,
-    `doctor-status: ${result.doctor.status}`,
-    `notified: ${result.notified ? "true" : "false"}`,
-    `dry-run: ${result.dryRun ? "true" : "false"}`,
-    `cooldown-active: ${result.cooldownActive ? "true" : "false"}`,
-    `grace-active: ${result.graceActive ? "true" : "false"}`,
-    `cooldown-file: ${valueOrNone(result.cooldownFile)}`,
-    `cooldown-until: ${valueOrNone(result.cooldownUntil)}`,
-    `grace-until: ${valueOrNone(result.graceUntil)}`,
-    `envelope-id: ${valueOrNone(result.envelopeId)}`,
-    `notification-error: ${valueOrNone(result.notificationError)}`,
-    `pending-outbox: ${valueOrNone(result.doctor.summary.pendingOutbox)}`,
-    `sent-messages: ${valueOrNone(result.doctor.summary.sentMessages)}`,
-    `last-sent-at: ${valueOrNone(result.doctor.summary.lastSentAt)}`,
-    `hiboss-cursor-matches-sidecar: ${valueOrNone(result.doctor.summary.hibossCursorMatchesSidecar)}`,
-    `hiboss-recent-wechat-poll-failures: ${valueOrNone(result.doctor.summary.hibossRecentWechatPollFailures)}`,
-    `issue-count: ${result.doctor.issues.length}`,
-  ];
-  result.doctor.issues.forEach((issue, index) => {
-    const prefix = `issue-${index + 1}`;
-    lines.push(`${prefix}-level: ${issue.level}`);
-    lines.push(`${prefix}-name: ${issue.name}`);
-    lines.push(`${prefix}-message: ${issue.message}`);
-  });
-  return lines.join("\n");
 }
 
 export function parseWechatClawbotMonitorCliArgs(args: string[]): WechatClawbotMonitorCliOptions {
@@ -448,27 +400,6 @@ export function runWechatClawbotMonitorStatus(options: WechatClawbotMonitorStatu
     lastNotified: last.notified,
     lastIssueCount,
   };
-}
-
-export function formatWechatClawbotMonitorStatusResult(result: WechatClawbotMonitorStatusResult): string {
-  return [
-    `ok: ${result.ok ? "true" : "false"}`,
-    `max-age-minutes: ${result.maxAgeMinutes}`,
-    `cron-file: ${result.cronFile}`,
-    `cron-file-exists: ${result.cronFileExists ? "true" : "false"}`,
-    `cron-command-present: ${valueOrNone(result.cronCommandPresent)}`,
-    `cron-notify-target-configured: ${valueOrNone(result.cronNotifyTargetConfigured)}`,
-    `cron-active: ${valueOrNone(result.cronActive)}`,
-    `log-file: ${result.logFile}`,
-    `log-file-exists: ${result.logFileExists ? "true" : "false"}`,
-    `last-run-at: ${valueOrNone(result.lastRunAt)}`,
-    `last-run-fresh: ${valueOrNone(result.lastRunFresh)}`,
-    `last-run-age-seconds: ${valueOrNone(result.lastRunAgeSeconds)}`,
-    `last-monitor-status: ${valueOrNone(result.lastMonitorStatus)}`,
-    `last-doctor-status: ${valueOrNone(result.lastDoctorStatus)}`,
-    `last-notified: ${valueOrNone(result.lastNotified)}`,
-    `last-issue-count: ${valueOrNone(result.lastIssueCount)}`,
-  ].join("\n");
 }
 
 export function parseWechatClawbotMonitorStatusCliArgs(args: string[]): WechatClawbotMonitorStatusCliOptions {
