@@ -21,7 +21,8 @@ export interface WechatClawbotSidecarEvent {
   eventId: string;
   accountId: string;
   peerId: string;
-  text: string;
+  text?: string;
+  attachments?: Array<{ source: string; filename?: string }>;
   messageId?: string;
   createdAt?: string;
   peerName?: string;
@@ -146,9 +147,17 @@ export function normalizeWechatClawbotSidecarEvent(raw: unknown): WechatClawbotS
   const accountId = stringField(record, "accountId", "account_id", "botId", "bot_id");
   const peerId = stringField(record, "peerId", "peer_id", "fromUserId", "from_user_id");
   const text = stringField(record, "text");
+  const rawAttachments = Array.isArray(record.attachments) ? record.attachments : [];
+  const attachments = rawAttachments.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const source = stringField(item as Record<string, unknown>, "source");
+    if (!source) return [];
+    const filename = stringField(item as Record<string, unknown>, "filename");
+    return [{ source, filename }];
+  });
 
-  if (!eventId || !accountId || !peerId || !text) {
-    throw new Error("Invalid wechat-clawbot event (eventId, accountId, peerId, text are required)");
+  if (!eventId || !accountId || !peerId || (!text && attachments.length === 0)) {
+    throw new Error("Invalid wechat-clawbot event (eventId, accountId, peerId, and text or attachments are required)");
   }
 
   return {
@@ -156,6 +165,7 @@ export function normalizeWechatClawbotSidecarEvent(raw: unknown): WechatClawbotS
     accountId,
     peerId,
     text,
+    attachments: attachments.length > 0 ? attachments : undefined,
     messageId: stringField(record, "messageId", "message_id", "msgId", "msg_id"),
     createdAt: stringField(record, "createdAt", "created_at"),
     peerName: stringField(record, "peerName", "peer_name", "displayName", "display_name"),
@@ -177,6 +187,7 @@ export function buildWechatClawbotChannelMessage(event: WechatClawbotSidecarEven
     },
     content: {
       text: event.text,
+      attachments: event.attachments,
     },
     raw: event.raw,
   };
@@ -206,11 +217,9 @@ export class WechatClawbotSidecarClient {
 
   async sendText(target: WechatClawbotTarget, content: MessageContent): Promise<void> {
     const text = content.text?.trim();
-    if (!text) {
-      throw new Error("wechat-clawbot adapter requires text content");
-    }
-    if (content.attachments?.length) {
-      throw new Error("wechat-clawbot adapter MVP supports text-only messages");
+    const attachments = content.attachments ?? [];
+    if (!text && attachments.length === 0) {
+      throw new Error("wechat-clawbot adapter requires text or attachments");
     }
 
     const url = new URL(
@@ -221,7 +230,17 @@ export class WechatClawbotSidecarClient {
     await this.fetchJson(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({
+        ...(text ? { text } : {}),
+        ...(attachments.length > 0
+          ? {
+              attachments: attachments.map((attachment) => ({
+                source: attachment.source,
+                filename: attachment.filename,
+              })),
+            }
+          : {}),
+      }),
     });
   }
 

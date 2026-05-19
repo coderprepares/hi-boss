@@ -1,14 +1,46 @@
+import * as fs from "fs";
+import * as path from "path";
+
 import { resolveWechatClawbotIlinkBotToken } from "./config.js";
-import type { IlinkTextMessage, WechatClawbotIlinkAccountConfig } from "./types.js";
+import {
+  aesEcbPaddedSize,
+  defaultWechatMediaFilename,
+  downloadWechatCdnMedia,
+  md5Hex,
+  randomHex,
+  uploadWechatCdnMedia,
+  type WechatCdnMediaRef,
+  type UploadedWechatMedia,
+} from "./media.js";
+import type {
+  IlinkMessage,
+  StoredWechatClawbotAttachment,
+  WechatClawbotIlinkAccountConfig,
+} from "./types.js";
 
 export type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 interface IlinkClientOptions {
   apiBaseUrl: string;
+  cdnBaseUrl: string;
+  mediaDir: string;
   requestTimeoutMs: number;
   fetchImpl?: FetchLike;
   env?: NodeJS.ProcessEnv;
 }
+
+const UploadMediaType = {
+  IMAGE: 1,
+  FILE: 3,
+} as const;
+
+const MessageItemType = {
+  TEXT: 1,
+  IMAGE: 2,
+  FILE: 4,
+} as const;
+
+const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"]);
 
 function objectRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -50,6 +82,15 @@ function normalizeBaseUrl(raw: string): string {
   return url.toString().replace(/\/$/, "");
 }
 
+function detectOutboundKind(attachment: StoredWechatClawbotAttachment): "image" | "file" {
+  const ext = path.extname(attachment.filename ?? attachment.source).toLowerCase();
+  return IMAGE_EXTENSIONS.has(ext) ? "image" : "file";
+}
+
+function uploadAesKeyForMessage(aeskeyHex: string): string {
+  return Buffer.from(aeskeyHex).toString("base64");
+}
+
 function randomWechatUin(): string {
   const value = String(Math.floor(Math.random() * 0x100000000));
   return Buffer.from(value).toString("base64");
@@ -72,10 +113,73 @@ function textFromItemList(raw: unknown): string | undefined {
   return parts.length > 0 ? parts.join("") : undefined;
 }
 
-function normalizeMessages(raw: unknown): IlinkTextMessage[] {
-  const record = objectRecord(raw, "iLink getupdates response");
+function mediaRef(value: unknown): WechatCdnMediaRef | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as WechatCdnMediaRef
+    : undefined;
+}
+
+async function attachmentsFromItemList(params: {
+  items: unknown;
+  messageId: string;
+  mediaDir: string;
+  fetchImpl: FetchLike;
+  requestTimeoutMs: number;
+}): Promise<StoredWechatClawbotAttachment[]> {
+  const items = Array.isArray(params.items) ? params.items : [];
+  const result: StoredWechatClawbotAttachment[] = [];
+
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const record = item as Record<string, unknown>;
+    const itemType = stringField(record, "type", "item_type", "itemType")?.toUpperCase();
+    const numericType = numberField(record, "type");
+    const type = numericType ?? (itemType === "IMAGE" ? 2 : itemType === "FILE" ? 4 : undefined);
+
+    if (type === 2 && record.image_item && typeof record.image_item === "object") {
+      const image = record.image_item as Record<string, unknown>;
+      const media = mediaRef(image.media) ?? mediaRef(image.thumb_media);
+      if (!media) continue;
+      const attachment = await downloadWechatCdnMedia({
+        media,
+        mediaDir: params.mediaDir,
+        filename: defaultWechatMediaFilename({ messageId: params.messageId, itemIndex: index, kind: "image" }),
+        aesKey: stringField(image, "aeskey"),
+        fetchImpl: params.fetchImpl,
+        requestTimeoutMs: params.requestTimeoutMs,
+      });
+      if (attachment) result.push(attachment);
+    }
+
+    if (type === 4 && record.file_item && typeof record.file_item === "object") {
+      const file = record.file_item as Record<string, unknown>;
+      const media = mediaRef(file.media);
+      if (!media) continue;
+      const filename = stringField(file, "file_name", "filename", "name");
+      const attachment = await downloadWechatCdnMedia({
+        media,
+        mediaDir: params.mediaDir,
+        filename: defaultWechatMediaFilename({ messageId: params.messageId, itemIndex: index, kind: "file", filename }),
+        fetchImpl: params.fetchImpl,
+        requestTimeoutMs: params.requestTimeoutMs,
+      });
+      if (attachment) result.push(attachment);
+    }
+  }
+
+  return result;
+}
+
+async function normalizeMessages(params: {
+  raw: unknown;
+  mediaDir: string;
+  fetchImpl: FetchLike;
+  requestTimeoutMs: number;
+}): Promise<IlinkMessage[]> {
+  const record = objectRecord(params.raw, "iLink getupdates response");
   const messages = arrayField(record, "msgs", "message_list", "messageList", "messages", "updates");
-  const result: IlinkTextMessage[] = [];
+  const result: IlinkMessage[] = [];
 
   for (const rawMessage of messages) {
     if (!rawMessage || typeof rawMessage !== "object" || Array.isArray(rawMessage)) continue;
@@ -84,16 +188,27 @@ function normalizeMessages(raw: unknown): IlinkTextMessage[] {
     const fromUserId = stringField(message, "from_user_id", "fromUserId", "from");
     const contextToken = stringField(message, "context_token", "contextToken");
     const directText = stringField(message, "text", "content");
-    const text = directText ?? textFromItemList(message.item_list ?? message.itemList);
-    if (!messageId || !fromUserId || !contextToken || !text) continue;
+    const itemList = message.item_list ?? message.itemList;
+    const text = directText ?? textFromItemList(itemList);
+    if (!messageId || !fromUserId || !contextToken) continue;
+    const attachments = await attachmentsFromItemList({
+      items: itemList,
+      messageId,
+      mediaDir: params.mediaDir,
+      fetchImpl: params.fetchImpl,
+      requestTimeoutMs: params.requestTimeoutMs,
+    });
+    if (!text && attachments.length === 0) continue;
     const createTime = message.create_time_ms ?? message.createTimeMs ?? message.create_time;
-    result.push({
+    const normalized: IlinkMessage = {
       messageId,
       fromUserId,
       contextToken,
       text,
       createTimeMs: typeof createTime === "number" ? createTime : undefined,
-    });
+    };
+    if (attachments.length > 0) normalized.attachments = attachments;
+    result.push(normalized);
   }
 
   return result;
@@ -113,7 +228,7 @@ export class WechatClawbotIlinkClient {
   async fetchUpdates(
     account: WechatClawbotIlinkAccountConfig,
     getUpdatesBuf: string
-  ): Promise<{ messages: IlinkTextMessage[]; nextCursor: string }> {
+  ): Promise<{ messages: IlinkMessage[]; nextCursor: string }> {
     const data = await this.post(account, "/ilink/bot/getupdates", {
       get_updates_buf: getUpdatesBuf,
       base_info: {
@@ -122,7 +237,12 @@ export class WechatClawbotIlinkClient {
     });
     const record = objectRecord(data, "iLink getupdates response");
     return {
-      messages: normalizeMessages(record),
+      messages: await normalizeMessages({
+        raw: record,
+        mediaDir: this.options.mediaDir,
+        fetchImpl: this.fetchImpl,
+        requestTimeoutMs: this.options.requestTimeoutMs,
+      }),
       nextCursor: stringField(record, "get_updates_buf", "next_get_updates_buf", "nextCursor") ?? getUpdatesBuf,
     };
   }
@@ -133,6 +253,108 @@ export class WechatClawbotIlinkClient {
     contextToken: string,
     text: string
   ): Promise<void> {
+    await this.sendMessage(account, peerId, contextToken, { text });
+  }
+
+  async sendMessage(
+    account: WechatClawbotIlinkAccountConfig,
+    peerId: string,
+    contextToken: string,
+    content: { text?: string; attachments?: StoredWechatClawbotAttachment[] }
+  ): Promise<void> {
+    const text = content.text?.trim();
+    const attachments = content.attachments ?? [];
+    if (!text && attachments.length === 0) return;
+
+    if (text) {
+      await this.postSendMessage(account, peerId, contextToken, [{
+        type: MessageItemType.TEXT,
+        text_item: { text },
+      }]);
+    }
+
+    for (const attachment of attachments) {
+      const uploaded = await this.uploadAttachment(account, peerId, attachment);
+      const kind = detectOutboundKind(attachment);
+      if (kind === "image") {
+        await this.postSendMessage(account, peerId, contextToken, [{
+          type: MessageItemType.IMAGE,
+          image_item: {
+            media: {
+              encrypt_query_param: uploaded.downloadEncryptedQueryParam,
+              aes_key: uploadAesKeyForMessage(uploaded.aeskeyHex),
+              encrypt_type: 1,
+            },
+            mid_size: uploaded.ciphertextSize,
+          },
+        }]);
+      } else {
+        await this.postSendMessage(account, peerId, contextToken, [{
+          type: MessageItemType.FILE,
+          file_item: {
+            media: {
+              encrypt_query_param: uploaded.downloadEncryptedQueryParam,
+              aes_key: uploadAesKeyForMessage(uploaded.aeskeyHex),
+              encrypt_type: 1,
+            },
+            file_name: path.basename(attachment.filename ?? attachment.source),
+            len: String(uploaded.rawSize),
+          },
+        }]);
+      }
+    }
+  }
+
+  async uploadAttachment(
+    account: WechatClawbotIlinkAccountConfig,
+    peerId: string,
+    attachment: StoredWechatClawbotAttachment
+  ): Promise<UploadedWechatMedia> {
+    const plaintext = fs.readFileSync(attachment.source);
+    const rawSize = plaintext.length;
+    const filekey = randomHex(16);
+    const aeskeyHex = randomHex(16);
+    const kind = detectOutboundKind(attachment);
+    const uploadUrl = await this.post(account, "/ilink/bot/getuploadurl", {
+      filekey,
+      media_type: kind === "image" ? UploadMediaType.IMAGE : UploadMediaType.FILE,
+      to_user_id: peerId,
+      rawsize: rawSize,
+      rawfilemd5: md5Hex(plaintext),
+      filesize: aesEcbPaddedSize(rawSize),
+      no_need_thumb: true,
+      aeskey: aeskeyHex,
+      base_info: {
+        channel_version: "1.0.3",
+      },
+    });
+    const record = objectRecord(uploadUrl, "iLink getuploadurl response");
+    const uploaded = await uploadWechatCdnMedia({
+      plaintext,
+      uploadFullUrl: stringField(record, "upload_full_url", "uploadFullUrl"),
+      uploadParam: stringField(record, "upload_param", "uploadParam"),
+      filekey,
+      cdnBaseUrl: this.options.cdnBaseUrl,
+      aeskey: Buffer.from(aeskeyHex, "hex"),
+      fetchImpl: this.fetchImpl,
+      requestTimeoutMs: this.options.requestTimeoutMs,
+    });
+    return {
+      filekey,
+      downloadEncryptedQueryParam: uploaded.downloadEncryptedQueryParam,
+      aeskeyHex,
+      rawSize,
+      ciphertextSize: uploaded.ciphertextSize,
+      md5: md5Hex(plaintext),
+    };
+  }
+
+  private async postSendMessage(
+    account: WechatClawbotIlinkAccountConfig,
+    peerId: string,
+    contextToken: string,
+    itemList: Array<Record<string, unknown>>
+  ): Promise<void> {
     await this.post(account, "/ilink/bot/sendmessage", {
       msg: {
         from_user_id: "",
@@ -141,10 +363,7 @@ export class WechatClawbotIlinkClient {
         message_type: 2,
         message_state: 2,
         context_token: contextToken,
-        item_list: [{
-          type: 1,
-          text_item: { text },
-        }],
+        item_list: itemList,
       },
       base_info: {
         channel_version: "1.0.3",

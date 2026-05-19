@@ -17,12 +17,14 @@ const baseConfig: WechatClawbotSidecarConfig = {
   host: "127.0.0.1",
   port: 26322,
   stateFile: "/tmp/wechat-clawbot-state.json",
+  mediaDir: "/tmp/wechat-clawbot-media",
   transport: "ilink",
   mockIngestEnabled: false,
   allowNonLocalBind: false,
   pollIntervalMs: 2000,
   requestTimeoutMs: 1000,
   ilinkApiBaseUrl: "https://ilink.example.test",
+  ilinkCdnBaseUrl: "https://cdn.example.test/c2c",
   ilinkAccounts: [{ accountId: "acct", botTokenEnv: "ILINK_TOKEN" }],
 };
 

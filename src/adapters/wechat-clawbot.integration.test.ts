@@ -22,6 +22,7 @@ test("wechat-clawbot adapter exchanges text with local sidecar scaffold", async 
     host: "127.0.0.1",
     port: 0,
     stateFile: tempStateFile(),
+    mediaDir: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "wechat-clawbot-media-")), "media"),
     transport: "mock",
     mockIngestEnabled: true,
     allowNonLocalBind: false,
@@ -29,6 +30,7 @@ test("wechat-clawbot adapter exchanges text with local sidecar scaffold", async 
     pollIntervalMs: 2000,
     requestTimeoutMs: 1000,
     ilinkApiBaseUrl: "https://ilink.example.test",
+    ilinkCdnBaseUrl: "https://cdn.example.test/c2c",
     ilinkAccounts: [],
   }, { apiToken: "sidecar-token" });
 

@@ -24,6 +24,7 @@ async function startSidecar(
     host: "127.0.0.1",
     port: 0,
     stateFile: tempStateFile(),
+    mediaDir: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "wechat-clawbot-media-")), "media"),
     transport: "mock",
     mockIngestEnabled: true,
     allowNonLocalBind: false,
@@ -31,6 +32,7 @@ async function startSidecar(
     pollIntervalMs: 2000,
     requestTimeoutMs: 1000,
     ilinkApiBaseUrl: "https://ilink.example.test",
+    ilinkCdnBaseUrl: "https://cdn.example.test/c2c",
     ilinkAccounts: [],
     ...overrides,
   }, { apiToken, ilinkFetchImpl });
@@ -119,6 +121,32 @@ test("sidecar deduplicates stable message ids", async () => {
 
     const updates = await fetchJson(`${sidecar.url()}/updates`);
     assert.equal(updates.body.events.length, 1);
+  } finally {
+    await sidecar.stop();
+  }
+});
+
+test("sidecar accepts mock attachment events without text", async () => {
+  const sidecar = await startSidecar();
+  try {
+    const ingested = await fetchJson(`${sidecar.url()}/__mock/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        peer_id: "wxid_boss",
+        message_id: "msg-attachment",
+        attachments: [{ source: "/tmp/wechat-image.jpg", filename: "wechat-image.jpg" }],
+      }),
+    });
+    assert.equal(ingested.status, 201);
+
+    const updates = await fetchJson(`${sidecar.url()}/updates`);
+    assert.equal(updates.body.events.length, 1);
+    assert.equal(updates.body.events[0].text, undefined);
+    assert.deepEqual(updates.body.events[0].attachments, [{
+      source: "/tmp/wechat-image.jpg",
+      filename: "wechat-image.jpg",
+    }]);
   } finally {
     await sidecar.stop();
   }

@@ -6,6 +6,7 @@ import { WechatClawbotStateStore } from "./state.js";
 import {
   SidecarHttpError,
   type IncomingWechatClawbotEvent,
+  type StoredWechatClawbotAttachment,
   type WechatClawbotIlinkAccountConfig,
   type WechatClawbotSidecarConfig,
   type WechatClawbotSidecarRuntimeOptions,
@@ -78,6 +79,27 @@ function safeStatusError(err: unknown): string {
     .slice(0, 500);
 }
 
+function normalizeBodyAttachments(body: Record<string, unknown>): StoredWechatClawbotAttachment[] {
+  const raw = Array.isArray(body.attachments) ? body.attachments : [];
+  return raw.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    const source = typeof record.source === "string" ? record.source.trim() : "";
+    if (!source) return [];
+    const filename = typeof record.filename === "string" && record.filename.trim()
+      ? record.filename.trim()
+      : undefined;
+    return [{ source, filename }];
+  });
+}
+
+function contentSummary(text: string, attachments: StoredWechatClawbotAttachment[]): string {
+  const trimmed = text.trim();
+  if (trimmed && attachments.length > 0) return `${trimmed}\n[attachments: ${attachments.length}]`;
+  if (trimmed) return trimmed;
+  return `[attachments: ${attachments.length}]`;
+}
+
 export class WechatClawbotSidecarServer {
   private server: http.Server;
   private store: WechatClawbotStateStore;
@@ -102,6 +124,8 @@ export class WechatClawbotSidecarServer {
     if (config.transport === "ilink") {
       this.ilink = new WechatClawbotIlinkClient({
         apiBaseUrl: config.ilinkApiBaseUrl,
+        cdnBaseUrl: config.ilinkCdnBaseUrl,
+        mediaDir: config.mediaDir,
         requestTimeoutMs: config.requestTimeoutMs,
         fetchImpl: runtime.ilinkFetchImpl,
       });
@@ -204,7 +228,8 @@ export class WechatClawbotSidecarServer {
     if (req.method === "POST" && sendTarget) {
       const body = await readJsonBody(req);
       const text = typeof body.text === "string" ? body.text : "";
-      const sent = await this.sendText(sendTarget.accountId, sendTarget.peerId, text);
+      const attachments = normalizeBodyAttachments(body);
+      const sent = await this.sendMessage(sendTarget.accountId, sendTarget.peerId, { text, attachments });
       json(res, 200, { ok: true, message_id: sent.id });
       return;
     }
@@ -261,6 +286,7 @@ export class WechatClawbotSidecarServer {
           message_id: message.messageId,
           event_id: `${account.accountId}:${message.messageId}`,
           text: message.text,
+          attachments: message.attachments,
           context_token_ref: message.contextToken,
         });
         await this.flushPendingOutbound(account, message.fromUserId).catch(() => undefined);
@@ -270,9 +296,26 @@ export class WechatClawbotSidecarServer {
     await this.sendExpiryReminders().catch(() => undefined);
   }
 
-  private async sendText(accountId: string, peerId: string, text: string) {
-    if (!this.ilink) return this.store.sendText(accountId, peerId, text);
-    const trimmed = text.trim();
+  private async sendMessage(
+    accountId: string,
+    peerId: string,
+    content: { text: string; attachments: StoredWechatClawbotAttachment[] }
+  ) {
+    const trimmed = content.text.trim();
+    const attachments = content.attachments;
+    if (!trimmed && attachments.length === 0) {
+      throw new SidecarHttpError(400, "invalid-content", "text or attachments are required");
+    }
+    if (!this.ilink) {
+      if (!this.store.getPeerContextToken(accountId, peerId)) {
+        throw new SidecarHttpError(
+          409,
+          "missing-context-token",
+          "peer has no active context token; have the peer send one test message first"
+        );
+      }
+      return this.store.recordSentText(accountId, peerId, contentSummary(trimmed, attachments));
+    }
     const account = this.config.ilinkAccounts.find((item) => item.accountId === accountId);
     if (!account) throw new SidecarHttpError(404, "account-not-found", "iLink account not found");
     const contextToken = this.store.getPeerContextToken(accountId, peerId);
@@ -284,12 +327,18 @@ export class WechatClawbotSidecarServer {
       );
     }
     try {
-      await this.ilink.sendText(account, peerId, contextToken, trimmed);
+      await this.ilink.sendMessage(account, peerId, contextToken, { text: trimmed, attachments });
     } catch (err) {
-      this.store.recordPendingOutbound(accountId, peerId, trimmed, "send-failed", errorMessage(err));
-      throw new SidecarHttpError(502, "send-failed-queued", "send failed; message queued for next peer activation");
+      if (attachments.length === 0) {
+        this.store.recordPendingOutbound(accountId, peerId, trimmed, "send-failed", errorMessage(err));
+      }
+      throw new SidecarHttpError(
+        502,
+        attachments.length === 0 ? "send-failed-queued" : "send-failed",
+        attachments.length === 0 ? "send failed; message queued for next peer activation" : "send failed"
+      );
     }
-    return this.store.recordSentText(accountId, peerId, trimmed);
+    return this.store.recordSentText(accountId, peerId, contentSummary(trimmed, attachments));
   }
 
   private async flushPendingOutbound(account: WechatClawbotIlinkAccountConfig, peerId: string): Promise<void> {

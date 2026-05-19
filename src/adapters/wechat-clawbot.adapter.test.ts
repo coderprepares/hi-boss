@@ -49,6 +49,35 @@ test("wechat-clawbot adapter maps sidecar text updates to ChannelMessage", async
   assert.equal(messages[0].content.text, "hello");
 });
 
+test("wechat-clawbot adapter maps sidecar attachments to ChannelMessage", async () => {
+  const fetchImpl = async () => new Response(JSON.stringify({
+    events: [
+      {
+        event_id: "evt-image",
+        account_id: "acct",
+        peer_id: "wxid_boss",
+        attachments: [{ source: "/tmp/wechat-image.jpg", filename: "wechat-image.jpg" }],
+      },
+    ],
+    next_cursor: "cursor-1",
+  }), { status: 200 });
+
+  const adapter = new WechatClawbotAdapter(makeAdapterToken(), { fetchImpl });
+  const messages: ChannelMessage[] = [];
+  adapter.onMessage((message) => {
+    messages.push(message);
+  });
+
+  await adapter.pollOnce();
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].content.text, undefined);
+  assert.deepEqual(messages[0].content.attachments, [{
+    source: "/tmp/wechat-image.jpg",
+    filename: "wechat-image.jpg",
+  }]);
+});
+
 test("wechat-clawbot adapter skips existing sidecar events when no stored cursor exists", async () => {
   const savedCursors: string[] = [];
   const requests: string[] = [];
@@ -170,6 +199,23 @@ test("wechat-clawbot adapter sends text through sidecar peer endpoint", async ()
   assert.equal(capturedUrl, "http://sidecar.local/accounts/acct/peers/wxid_boss/messages");
   assert.equal(capturedMethod, "POST");
   assert.deepEqual(JSON.parse(capturedBody), { text: "reply" });
+});
+
+test("wechat-clawbot adapter sends attachments through sidecar peer endpoint", async () => {
+  let capturedBody = "";
+  const fetchImpl = async (_input: string | URL, init?: RequestInit) => {
+    capturedBody = String(init?.body ?? "");
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+
+  const adapter = new WechatClawbotAdapter(makeAdapterToken(), { fetchImpl });
+  await adapter.sendMessage("acct/wxid_boss", {
+    attachments: [{ source: "/tmp/report.pdf", filename: "report.pdf" }],
+  });
+
+  assert.deepEqual(JSON.parse(capturedBody), {
+    attachments: [{ source: "/tmp/report.pdf", filename: "report.pdf" }],
+  });
 });
 
 test("wechat-clawbot adapter turns sidecar slash commands into command replies", async () => {

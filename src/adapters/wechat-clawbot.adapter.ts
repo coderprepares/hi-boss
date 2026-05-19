@@ -34,7 +34,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function parseSlashCommand(event: WechatClawbotSidecarEvent): ChannelCommand | undefined {
-  const match = event.text.match(/^\/(new|status|abort|help)(?:\s+(.*))?$/i);
+  const match = event.text?.match(/^\/(new|status|abort|help)(?:\s+(.*))?$/i);
   if (!match) return undefined;
 
   return {
@@ -47,7 +47,7 @@ function parseSlashCommand(event: WechatClawbotSidecarEvent): ChannelCommand | u
 }
 
 /**
- * Text-only WeChat ClawBot sidecar adapter.
+ * WeChat ClawBot sidecar adapter.
  *
  * The adapter intentionally talks only to a local sidecar contract. It does
  * not load OpenClaw, iLink credentials, or real WeChat tokens into the daemon.

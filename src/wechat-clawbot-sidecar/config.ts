@@ -6,6 +6,7 @@ import type { WechatClawbotSidecarConfig } from "./types.js";
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 26322;
 const DEFAULT_ILINK_API_BASE_URL = "https://ilinkai.weixin.qq.com";
+const DEFAULT_ILINK_CDN_BASE_URL = "https://novac2c.cdn.weixin.qq.com/c2c";
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -73,6 +74,10 @@ export function loadWechatClawbotSidecarConfig(
     stringValue(raw.stateFile) ??
     stringValue(env.HIBOSS_WECHAT_CLAWBOT_STATE_FILE) ??
     path.join(process.cwd(), ".wechat-clawbot-sidecar", "state.json");
+  const mediaDir =
+    stringValue(raw.mediaDir) ??
+    stringValue(env.HIBOSS_WECHAT_CLAWBOT_MEDIA_DIR) ??
+    path.join(path.dirname(stateFile), "media");
 
   const allowNonLocalBind =
     boolValue(raw.allowNonLocalBind) ??
@@ -83,6 +88,7 @@ export function loadWechatClawbotSidecarConfig(
     host: stringValue(raw.host) ?? stringValue(env.HIBOSS_WECHAT_CLAWBOT_HOST) ?? DEFAULT_HOST,
     port: numberValue(raw.port) ?? numberValue(env.HIBOSS_WECHAT_CLAWBOT_PORT) ?? DEFAULT_PORT,
     stateFile,
+    mediaDir,
     transport:
       stringValue(raw.transport) === "ilink" || stringValue(env.HIBOSS_WECHAT_CLAWBOT_TRANSPORT) === "ilink"
         ? "ilink"
@@ -101,6 +107,10 @@ export function loadWechatClawbotSidecarConfig(
       stringValue(raw.ilinkApiBaseUrl) ??
       stringValue(env.HIBOSS_WECHAT_CLAWBOT_ILINK_API_BASE_URL) ??
       DEFAULT_ILINK_API_BASE_URL,
+    ilinkCdnBaseUrl:
+      stringValue(raw.ilinkCdnBaseUrl) ??
+      stringValue(env.HIBOSS_WECHAT_CLAWBOT_ILINK_CDN_BASE_URL) ??
+      DEFAULT_ILINK_CDN_BASE_URL,
     ilinkAccounts: rawIlinkAccounts.map((account) => ({
       accountId: stringValue(account.accountId) ?? stringValue(account.account_id) ?? "",
       botTokenEnv: stringValue(account.botTokenEnv) ?? stringValue(account.bot_token_env),

@@ -162,8 +162,11 @@ export class WechatClawbotStateStore {
     const accountId = stringField(input, "account_id", "accountId") ?? fallbackAccount;
     const peerId = stringField(input, "peer_id", "peerId");
     const text = stringField(input, "text");
-    if (!accountId || !peerId || !text) {
-      throw new SidecarHttpError(400, "invalid-event", "account_id, peer_id, and text are required");
+    const attachments = Array.isArray(input.attachments)
+      ? input.attachments.filter((item) => item && typeof item.source === "string" && item.source.trim())
+      : [];
+    if (!accountId || !peerId || (!text && attachments.length === 0)) {
+      throw new SidecarHttpError(400, "invalid-event", "account_id, peer_id, and text or attachments are required");
     }
 
     const messageId = stringField(input, "message_id", "messageId");
@@ -177,6 +180,7 @@ export class WechatClawbotStateStore {
       account_id: accountId,
       peer_id: peerId,
       text,
+      attachments: attachments.length > 0 ? attachments : undefined,
       created_at: now,
       message_id: messageId,
       peer_name: stringField(input, "peer_name", "peerName"),

@@ -17,18 +17,15 @@ Key files:
 ## Scope
 
 MVP scope:
-- Text-only direct-message flow.
+- Direct-message text flow plus image/file attachments over iLink CDN media.
 - Local sidecar only (`127.0.0.1` or equivalent local networking).
-- Inbound text updates from sidecar → Hi-Boss envelopes.
-- Agent text replies from Hi-Boss → sidecar `sendmessage`.
+- Inbound text and downloaded image/file attachments from sidecar → Hi-Boss envelopes.
+- Agent text/image/file replies from Hi-Boss → sidecar `sendmessage`.
 - Stable boss identification by sidecar peer id.
 - No real WeChat credentials in Hi-Boss DB, envelopes, logs, or prompts.
 
-Out of scope for MVP:
-- Media, voice, files, stickers, reactions, and typing indicators.
-- Reading arbitrary existing friends/groups or bulk/group automation.
-- Payment, transfers, red packets, contacts scraping, friend automation.
-- Public webhooks directly to Hi-Boss.
+Out of scope for MVP: voice, video, stickers, reactions, typing indicators, bulk/group automation,
+payment, transfers, red packets, contacts scraping, friend automation, and public webhooks directly to Hi-Boss.
 
 ## Sidecar Contract
 
@@ -57,7 +54,7 @@ setup JSON examples, envelopes, or daemon logs.
 
 ### `GET /updates`
 
-Fetches text events already polled from iLink by the sidecar.
+Fetches message events already polled from iLink by the sidecar.
 
 Query:
 - `cursor` — optional opaque cursor returned by the previous call.
@@ -73,18 +70,15 @@ Response:
       "peer_id": "wxid_example",
       "peer_name": "Boss",
       "message_id": "msg_123",
-      "text": "hello"
+      "text": "hello",
+      "attachments": [{ "source": "/root/hiboss/media/wechat-clawbot/image.jpg", "filename": "image.jpg" }]
     }
   ],
   "next_cursor": "cursor_2"
 }
 ```
 
-Required event fields:
-- `event_id`
-- `account_id`
-- `peer_id`
-- `text`
+Required event fields: `event_id`, `account_id`, `peer_id`, and either `text` or `attachments`.
 
 The sidecar is responsible for:
 - QR login and login-state persistence.
@@ -109,13 +103,14 @@ pending items into a single summary when appropriate.
 
 ### `POST /accounts/:accountId/peers/:peerId/messages`
 
-Sends a text reply to a peer using the latest stored `context_token`.
+Sends a text and/or local image/file attachment reply using the latest stored `context_token`.
 
 Request:
 
 ```json
 {
-  "text": "agent reply"
+  "text": "agent reply",
+  "attachments": [{ "source": "/root/hiboss/media/report.pdf", "filename": "report.pdf" }]
 }
 ```
 
@@ -289,12 +284,14 @@ Environment configuration:
 | `HIBOSS_WECHAT_CLAWBOT_HOST` | `127.0.0.1` | Bind host; keep loopback for MVP |
 | `HIBOSS_WECHAT_CLAWBOT_PORT` | `26322` | HTTP port |
 | `HIBOSS_WECHAT_CLAWBOT_STATE_FILE` | `.wechat-clawbot-sidecar/state.json` | File-backed scaffold state |
+| `HIBOSS_WECHAT_CLAWBOT_MEDIA_DIR` | next to state file | Downloaded inbound image/file attachments |
 | `HIBOSS_WECHAT_CLAWBOT_TRANSPORT` | `mock` | `mock` or `ilink` |
 | `HIBOSS_WECHAT_CLAWBOT_API_TOKEN_ENV` | unset | Env var name containing bearer token |
 | `HIBOSS_WECHAT_CLAWBOT_API_TOKEN_FILE` | unset | File containing bearer token; use mode `0600` |
 | `HIBOSS_WECHAT_CLAWBOT_MOCK_INGEST` | `false` | Enables `POST /__mock/events` for local tests |
 | `HIBOSS_WECHAT_CLAWBOT_DEFAULT_ACCOUNT` | unset | Fallback account for mock ingest |
 | `HIBOSS_WECHAT_CLAWBOT_ILINK_API_BASE_URL` | `https://ilinkai.weixin.qq.com` | iLink API root |
+| `HIBOSS_WECHAT_CLAWBOT_ILINK_CDN_BASE_URL` | `https://novac2c.cdn.weixin.qq.com/c2c` | iLink CDN upload fallback root |
 | `HIBOSS_WECHAT_CLAWBOT_POLL_INTERVAL_MS` | `2000` | iLink poll interval |
 | `HIBOSS_WECHAT_CLAWBOT_REQUEST_TIMEOUT_MS` | `35000` | iLink HTTP timeout |
 
@@ -451,7 +448,8 @@ and recommended multi-account rollout.
    - `from = channel:wechat-clawbot:<account-id>/<peer-id>`
    - `author.id = <peer-id>`
    - `chat.id = <account-id>/<peer-id>`
-   - `content.text = <text>`
+   - `content.text = <text>` when present
+   - `content.attachments = <downloaded image/file paths>` when present
 5. `ChannelBridge` routes the envelope to the agent bound to the sidecar
    binding token.
 
@@ -460,11 +458,12 @@ and recommended multi-account rollout.
 1. Agent sends an envelope to `channel:wechat-clawbot:<account-id>/<peer-id>`.
 2. Router verifies the sender agent has a `wechat-clawbot` binding.
 3. Adapter calls sidecar `POST /accounts/:accountId/peers/:peerId/messages`.
-4. Sidecar sends text via iLink `sendmessage` with the stored `context_token`.
-5. If iLink send fails after a context exists, sidecar queues the outbound text
-   and flushes it after the next inbound peer message refreshes the context.
+4. Sidecar sends text via `sendmessage`; image/file attachments are AES-encrypted and sent as iLink CDN media items.
+5. If iLink text send fails after a context exists, sidecar queues the outbound
+   text and flushes it after the next inbound peer message refreshes the context.
 
-The MVP adapter rejects attachments and empty text.
+The MVP adapter rejects empty content. Attachment sends require local file paths
+and are not queued on send failure.
 
 ## Boss Identification
 

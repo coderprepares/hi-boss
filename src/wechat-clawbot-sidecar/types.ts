@@ -2,6 +2,7 @@ export interface WechatClawbotSidecarConfig {
   host: string;
   port: number;
   stateFile: string;
+  mediaDir: string;
   transport: "mock" | "ilink";
   apiTokenEnv?: string;
   apiTokenFile?: string;
@@ -11,6 +12,7 @@ export interface WechatClawbotSidecarConfig {
   pollIntervalMs: number;
   requestTimeoutMs: number;
   ilinkApiBaseUrl: string;
+  ilinkCdnBaseUrl: string;
   ilinkAccounts: WechatClawbotIlinkAccountConfig[];
 }
 
@@ -31,10 +33,16 @@ export interface StoredWechatClawbotEvent {
   event_id: string;
   account_id: string;
   peer_id: string;
-  text: string;
+  text?: string;
+  attachments?: StoredWechatClawbotAttachment[];
   created_at: string;
   message_id?: string;
   peer_name?: string;
+}
+
+export interface StoredWechatClawbotAttachment {
+  source: string;
+  filename?: string;
 }
 
 export interface WechatClawbotPeerState {
@@ -104,6 +112,7 @@ export interface IncomingWechatClawbotEvent {
   peer_id?: string;
   peerId?: string;
   text?: string;
+  attachments?: StoredWechatClawbotAttachment[];
   event_id?: string;
   eventId?: string;
   message_id?: string;
@@ -114,10 +123,11 @@ export interface IncomingWechatClawbotEvent {
   contextTokenRef?: string;
 }
 
-export interface IlinkTextMessage {
+export interface IlinkMessage {
   messageId: string;
   fromUserId: string;
-  text: string;
+  text?: string;
+  attachments?: StoredWechatClawbotAttachment[];
   contextToken: string;
   createTimeMs?: number;
 }
