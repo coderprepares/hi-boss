@@ -75,12 +75,24 @@ function objectRecord(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function normalizeAttachments(raw: unknown): Array<{ source: string; filename?: string }> {
+  const rawAttachments = Array.isArray(raw) ? raw : [];
+  return rawAttachments.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const source = stringField(item as Record<string, unknown>, "source");
+    if (!source) return [];
+    const filename = stringField(item as Record<string, unknown>, "filename");
+    return [{ source, filename }];
+  });
+}
+
 function normalizeInReplyTo(record: Record<string, unknown>): ChannelMessage["inReplyTo"] | undefined {
   const raw = record.inReplyTo ?? record.in_reply_to;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const reply = raw as Record<string, unknown>;
   const channelMessageId = stringField(reply, "channelMessageId", "channel_message_id", "messageId", "message_id");
   const text = stringField(reply, "text");
+  const attachments = normalizeAttachments(reply.attachments);
   const rawAuthor = reply.author;
   const author = rawAuthor && typeof rawAuthor === "object" && !Array.isArray(rawAuthor)
     ? (() => {
@@ -96,11 +108,12 @@ function normalizeInReplyTo(record: Record<string, unknown>): ChannelMessage["in
       })()
     : undefined;
 
-  if (!channelMessageId && !text && !author) return undefined;
+  if (!channelMessageId && !text && !author && attachments.length === 0) return undefined;
   return {
     ...(channelMessageId ? { channelMessageId } : {}),
     ...(author ? { author } : {}),
     ...(text ? { text } : {}),
+    ...(attachments.length > 0 ? { attachments } : {}),
   };
 }
 
@@ -185,17 +198,11 @@ export function normalizeWechatClawbotSidecarEvent(raw: unknown): WechatClawbotS
   const accountId = stringField(record, "accountId", "account_id", "botId", "bot_id");
   const peerId = stringField(record, "peerId", "peer_id", "fromUserId", "from_user_id");
   const text = stringField(record, "text");
-  const rawAttachments = Array.isArray(record.attachments) ? record.attachments : [];
-  const attachments = rawAttachments.flatMap((item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-    const source = stringField(item as Record<string, unknown>, "source");
-    if (!source) return [];
-    const filename = stringField(item as Record<string, unknown>, "filename");
-    return [{ source, filename }];
-  });
+  const attachments = normalizeAttachments(record.attachments);
+  const inReplyTo = normalizeInReplyTo(record);
 
-  if (!eventId || !accountId || !peerId || (!text && attachments.length === 0)) {
-    throw new Error("Invalid wechat-clawbot event (eventId, accountId, peerId, and text or attachments are required)");
+  if (!eventId || !accountId || !peerId || (!text && attachments.length === 0 && !inReplyTo)) {
+    throw new Error("Invalid wechat-clawbot event (eventId, accountId, peerId, and text, attachments, or in_reply_to are required)");
   }
 
   return {
@@ -204,7 +211,7 @@ export function normalizeWechatClawbotSidecarEvent(raw: unknown): WechatClawbotS
     peerId,
     text,
     attachments: attachments.length > 0 ? attachments : undefined,
-    inReplyTo: normalizeInReplyTo(record),
+    inReplyTo,
     messageId: stringField(record, "messageId", "message_id", "msgId", "msg_id"),
     createdAt: stringField(record, "createdAt", "created_at"),
     peerName: stringField(record, "peerName", "peer_name", "displayName", "display_name"),

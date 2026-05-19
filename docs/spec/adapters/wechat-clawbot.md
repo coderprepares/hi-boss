@@ -449,8 +449,8 @@ and recommended multi-account rollout.
    - `chat.id = <account-id>/<peer-id>`
    - `content.text = <text>` when present
    - `content.attachments = <downloaded image/file paths>` when present
-   - `inReplyTo.text = <quoted text>` when iLink returns quoted content in `ref_msg.message_item`
-   - `inReplyTo.channelMessageId = <event-id>` only when the sidecar uniquely matches the quote to a stored prior event in the same account and peer
+   - `inReplyTo.text` / `inReplyTo.attachments` when iLink returns quoted text or media in `ref_msg.message_item`
+   - `inReplyTo.channelMessageId` only when the sidecar uniquely matches the quote to a stored prior event in the same account and peer
 5. `ChannelBridge` routes the envelope to the agent bound to the sidecar binding token.
 
 ## Outgoing Flow

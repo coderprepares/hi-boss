@@ -48,6 +48,7 @@ export interface StoredWechatClawbotInReplyTo {
   source_create_time_ms?: number;
   source_type?: string | number;
   text?: string;
+  attachments?: StoredWechatClawbotAttachment[];
 }
 
 export interface StoredWechatClawbotAttachment {

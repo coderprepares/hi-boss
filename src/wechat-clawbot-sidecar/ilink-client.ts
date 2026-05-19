@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 import { resolveWechatClawbotIlinkBotToken } from "./config.js";
-import { inReplyToFromItemList, textFromItemList } from "./message-items.js";
+import { inReplyToFromItemList, quotedMessageRecordsFromItemList, textFromItemList } from "./message-items.js";
 import {
   aesEcbPaddedSize,
   defaultWechatMediaFilename,
@@ -130,7 +130,7 @@ async function attachmentsFromItemList(params: {
         media,
         mediaDir: params.mediaDir,
         filename: defaultWechatMediaFilename({ messageId: params.messageId, itemIndex: index, kind: "image" }),
-        aesKey: stringField(image, "aeskey"),
+        aesKey: stringField(image, "aeskey", "aes_key"),
         fetchImpl: params.fetchImpl,
         requestTimeoutMs: params.requestTimeoutMs,
       });
@@ -154,6 +154,28 @@ async function attachmentsFromItemList(params: {
   }
 
   return result;
+}
+
+async function quotedAttachmentsFromItemList(params: {
+  items: unknown;
+  messageId: string;
+  mediaDir: string;
+  fetchImpl: FetchLike;
+  requestTimeoutMs: number;
+}): Promise<StoredWechatClawbotAttachment[]> {
+  const quotedItems = quotedMessageRecordsFromItemList(params.items).flatMap((record) => {
+    const nestedItems = record.item_list ?? record.itemList;
+    return Array.isArray(nestedItems) ? nestedItems : [record];
+  });
+  if (quotedItems.length === 0) return [];
+
+  return await attachmentsFromItemList({
+    items: quotedItems,
+    messageId: `${params.messageId}-quote`,
+    mediaDir: params.mediaDir,
+    fetchImpl: params.fetchImpl,
+    requestTimeoutMs: params.requestTimeoutMs,
+  });
 }
 
 async function normalizeMessages(params: {
@@ -187,7 +209,20 @@ async function normalizeMessages(params: {
       fetchImpl: params.fetchImpl,
       requestTimeoutMs: params.requestTimeoutMs,
     });
-    if (!text && attachments.length === 0) continue;
+    const quotedAttachments = await quotedAttachmentsFromItemList({
+      items: itemList,
+      messageId,
+      mediaDir: params.mediaDir,
+      fetchImpl: params.fetchImpl,
+      requestTimeoutMs: params.requestTimeoutMs,
+    });
+    const normalizedInReplyTo = inReplyTo || quotedAttachments.length > 0
+      ? {
+          ...(inReplyTo ?? {}),
+          ...(quotedAttachments.length > 0 ? { attachments: quotedAttachments } : {}),
+        }
+      : undefined;
+    if (!text && attachments.length === 0 && !normalizedInReplyTo) continue;
     const createTime = message.create_time_ms ?? message.createTimeMs ?? message.create_time;
     const normalized: IlinkMessage = {
       messageId,
@@ -197,7 +232,7 @@ async function normalizeMessages(params: {
       createTimeMs: typeof createTime === "number" ? createTime : undefined,
     };
     if (attachments.length > 0) normalized.attachments = attachments;
-    if (inReplyTo) normalized.inReplyTo = inReplyTo;
+    if (normalizedInReplyTo) normalized.inReplyTo = normalizedInReplyTo;
     result.push(normalized);
   }
 

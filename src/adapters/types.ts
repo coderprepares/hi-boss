@@ -109,6 +109,7 @@ export interface ChannelMessage {
       displayName: string;
     };
     text?: string;
+    attachments?: Attachment[];
   };
   chat: {
     id: string;

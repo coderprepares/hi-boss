@@ -70,6 +70,8 @@ Notes:
 | `envelopes[].inReplyTo` | object | Present only when the channel message is a reply (or empty) |
 | `envelopes[].inReplyTo.fromName` | string | Replied-to author display name (or empty) |
 | `envelopes[].inReplyTo.text` | string | Replied-to text excerpt (or `(none)`) |
+| `envelopes[].inReplyTo.attachments` | array | Replied-to attachment objects |
+| `envelopes[].inReplyTo.attachmentsText` | string | Pre-rendered replied-to attachment list (or `(none)`) |
 | `envelopes[].fromBoss` | boolean | Boss flag |
 | `envelopes[].isGroup` | boolean | Whether message is from a group chat |
 | `envelopes[].groupName` | string | Group name (or empty for direct/agent messages) |
@@ -102,6 +104,8 @@ Notes:
 | `envelope.inReplyTo` | object | Present only when the channel message is a reply (or empty) |
 | `envelope.inReplyTo.fromName` | string | Replied-to author display name (or empty) |
 | `envelope.inReplyTo.text` | string | Replied-to text excerpt (or `(none)`) |
+| `envelope.inReplyTo.attachments` | array | Replied-to attachment objects |
+| `envelope.inReplyTo.attachmentsText` | string | Pre-rendered replied-to attachment list (or `(none)`) |
 | `envelope.fromBoss` | boolean | Boss flag |
 | `envelope.isGroup` | boolean | Whether message is from a group chat |
 | `envelope.groupName` | string | Group name (or empty for direct/agent messages) |

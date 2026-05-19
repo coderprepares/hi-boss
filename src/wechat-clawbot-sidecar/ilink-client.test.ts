@@ -141,6 +141,61 @@ test("iLink client normalizes quoted message text from ref_msg", async () => {
   });
 });
 
+test("iLink client downloads quoted image attachments from ref_msg", async () => {
+  const mediaDir = tempMediaDir();
+  const key = crypto.randomBytes(16);
+  const imagePlaintext = Buffer.from("quoted-image-bytes");
+  const encryptedImage = encryptAes128Ecb(imagePlaintext, key);
+  const client = new WechatClawbotIlinkClient({
+    apiBaseUrl: "https://ilink.example.test",
+    cdnBaseUrl: "https://cdn.example.test/c2c",
+    mediaDir,
+    requestTimeoutMs: 1000,
+    env: { ILINK_TOKEN: "test-bot-token" },
+    fetchImpl: async (input) => {
+      const url = String(input);
+      if (url === "https://cdn.example.test/quoted-image") {
+        return new Response(new Uint8Array(encryptedImage), { status: 200 });
+      }
+      return new Response(JSON.stringify({
+        get_updates_buf: "cursor-2",
+        msgs: [{
+          message_id: "msg-quoted-image",
+          from_user_id: "wxid_boss",
+          context_token: "context-1",
+          item_list: [{
+            type: 1,
+            text_item: { text: "reply text" },
+            ref_msg: {
+              message_item: {
+                type: 2,
+                create_time_ms: 1779213695215,
+                image_item: {
+                  aeskey: key.toString("hex"),
+                  media: { full_url: "https://cdn.example.test/quoted-image" },
+                },
+              },
+            },
+          }],
+        }],
+      }), { status: 200 });
+    },
+  });
+
+  const result = await client.fetchUpdates({
+    accountId: "acct",
+    botTokenEnv: "ILINK_TOKEN",
+  }, "cursor-1");
+
+  assert.equal(result.messages.length, 1);
+  assert.equal(result.messages[0].text, "reply text");
+  assert.equal(result.messages[0].inReplyTo?.source_type, 2);
+  assert.equal(result.messages[0].inReplyTo?.source_create_time_ms, 1779213695215);
+  const attachment = result.messages[0].inReplyTo?.attachments?.[0];
+  assert.equal(attachment?.filename, "wechat-image-msg-quoted-image-quote-0.jpg");
+  assert.equal(fs.readFileSync(attachment!.source, "utf8"), "quoted-image-bytes");
+});
+
 test("iLink client traces raw message field keys without sensitive values", async () => {
   const writes: string[] = [];
   const originalWrite = process.stdout.write;

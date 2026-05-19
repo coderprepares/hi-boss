@@ -1,4 +1,5 @@
-import type { Envelope } from "../envelope/types.js";
+import type { Envelope, EnvelopeAttachment } from "../envelope/types.js";
+import { buildAttachmentPrompts, formatAttachmentsText, type AttachmentPrompt } from "./attachment-prompt.js";
 
 export interface ChannelMetadata {
   platform: string;
@@ -11,6 +12,7 @@ export interface ChannelMetadata {
     messageId?: string;
     author?: { id: string; username?: string; displayName: string };
     text?: string;
+    attachments?: EnvelopeAttachment[];
   };
 }
 
@@ -97,6 +99,8 @@ export function buildSemanticFrom(envelope: Envelope): SemanticFromResult | unde
 export interface InReplyToPrompt {
   fromName: string;
   text: string;
+  attachments: AttachmentPrompt[];
+  attachmentsText: string;
 }
 
 export function buildInReplyTo(metadata: unknown): InReplyToPrompt | undefined {
@@ -115,5 +119,24 @@ export function buildInReplyTo(metadata: unknown): InReplyToPrompt | undefined {
   }
 
   const text = typeof rt.text === "string" && rt.text.trim() ? rt.text : "(none)";
-  return { fromName, text };
+  const rawAttachments = Array.isArray(rt.attachments) ? rt.attachments : [];
+  const attachments = rawAttachments.flatMap((item): EnvelopeAttachment[] => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    const source = typeof record.source === "string" && record.source.trim() ? record.source.trim() : "";
+    if (!source) return [];
+    const filename = typeof record.filename === "string" && record.filename.trim()
+      ? record.filename.trim()
+      : undefined;
+    const telegramFileId = typeof record.telegramFileId === "string" && record.telegramFileId.trim()
+      ? record.telegramFileId.trim()
+      : undefined;
+    return [{ source, filename, telegramFileId }];
+  });
+  return {
+    fromName,
+    text,
+    attachments: buildAttachmentPrompts(attachments),
+    attachmentsText: formatAttachmentsText(attachments),
+  };
 }

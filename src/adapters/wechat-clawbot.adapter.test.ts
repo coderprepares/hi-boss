@@ -89,6 +89,7 @@ test("wechat-clawbot adapter maps quoted sidecar updates to ChannelMessage", asy
         in_reply_to: {
           channel_message_id: "evt-parent",
           text: "quoted text",
+          attachments: [{ source: "/tmp/quoted-image.jpg", filename: "quoted-image.jpg" }],
         },
       },
     ],
@@ -107,6 +108,7 @@ test("wechat-clawbot adapter maps quoted sidecar updates to ChannelMessage", asy
   assert.deepEqual(messages[0].inReplyTo, {
     channelMessageId: "evt-parent",
     text: "quoted text",
+    attachments: [{ source: "/tmp/quoted-image.jpg", filename: "quoted-image.jpg" }],
   });
 });
 

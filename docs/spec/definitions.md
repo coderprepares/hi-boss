@@ -81,7 +81,8 @@ Command flags:
 **Reply/quote keys** (only when the incoming channel message is a reply)
 - `in-reply-to-from-name:` (optional)
 - `in-reply-to-text:` (multiline)
-  - Note: adapters may truncate `in-reply-to-text` for safety/size (see adapter specs).
+- `in-reply-to-attachments:` followed by a rendered list (only shown if quoted media is present)
+- Note: adapters may truncate `in-reply-to-text` for safety/size (see adapter specs).
 
 **Delivery error keys** (only when a delivery attempt failed or the daemon terminalized an undeliverable envelope)
 - `last-delivery-error-at:` (boss timezone offset)

@@ -4,6 +4,7 @@ import * as path from "path";
 import {
   SidecarHttpError,
   type IncomingWechatClawbotEvent,
+  type StoredWechatClawbotAttachment,
   type StoredWechatClawbotInReplyTo,
   type WechatClawbotPendingOutboundMessage,
   type StoredWechatClawbotEvent,
@@ -94,7 +95,32 @@ function normalizeInReplyTo(input: IncomingWechatClawbotEvent): StoredWechatClaw
   const sourceType = record.source_type ?? record.sourceType ?? record.type;
   if (typeof sourceType === "string" || typeof sourceType === "number") result.source_type = sourceType;
 
+  const attachments = normalizeAttachments(record.attachments);
+  if (attachments.length > 0) result.attachments = attachments;
+
   return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function normalizeAttachments(raw: unknown): StoredWechatClawbotAttachment[] {
+  const items = Array.isArray(raw) ? raw : [];
+  return items.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    const source = typeof record.source === "string" && record.source.trim() ? record.source.trim() : "";
+    if (!source) return [];
+    const filename = typeof record.filename === "string" && record.filename.trim()
+      ? record.filename.trim()
+      : undefined;
+    return [{ source, filename }];
+  });
+}
+
+function hasReplyContent(inReplyTo: StoredWechatClawbotInReplyTo | undefined): boolean {
+  return Boolean(
+    inReplyTo?.channel_message_id ||
+    inReplyTo?.text ||
+    (inReplyTo?.attachments?.length ?? 0) > 0
+  );
 }
 
 export class WechatClawbotStateStore {
@@ -197,13 +223,10 @@ export class WechatClawbotStateStore {
     const accountId = stringField(input, "account_id", "accountId") ?? fallbackAccount;
     const peerId = stringField(input, "peer_id", "peerId");
     const text = stringField(input, "text");
-    const attachments = Array.isArray(input.attachments)
-      ? input.attachments.filter((item) => item && typeof item.source === "string" && item.source.trim())
-      : [];
-    if (!accountId || !peerId || (!text && attachments.length === 0)) {
-      throw new SidecarHttpError(400, "invalid-event", "account_id, peer_id, and text or attachments are required");
+    const attachments = normalizeAttachments(input.attachments);
+    if (!accountId || !peerId) {
+      throw new SidecarHttpError(400, "invalid-event", "account_id, peer_id, and text, attachments, or in_reply_to are required");
     }
-
     const messageId = stringField(input, "message_id", "messageId");
     const eventId =
       stringField(input, "event_id", "eventId") ??
@@ -211,6 +234,9 @@ export class WechatClawbotStateStore {
     const now = new Date().toISOString();
     const messageCreateTimeMs = numberField(input, "message_create_time_ms", "messageCreateTimeMs");
     const inReplyTo = this.resolveInReplyTo(accountId, peerId, normalizeInReplyTo(input));
+    if (!text && attachments.length === 0 && !hasReplyContent(inReplyTo)) {
+      throw new SidecarHttpError(400, "invalid-event", "account_id, peer_id, and text, attachments, or in_reply_to are required");
+    }
     const event: StoredWechatClawbotEvent = {
       seq: this.state.next_seq,
       event_id: eventId,

@@ -135,6 +135,7 @@ test("sidecar stores quoted text and matches referenced wechat events when uniqu
       body: JSON.stringify({ peer_id: "wxid_boss", message_id: "msg-parent", message_create_time_ms: 1779213000000, text: "quoted text" }),
     });
     assert.equal(parent.status, 201);
+    const quotedAttachment = { source: "/tmp/quoted-image.jpg", filename: "quoted-image.jpg" };
 
     const child = await fetchJson(`${sidecar.url()}/__mock/events`, {
       method: "POST",
@@ -143,7 +144,12 @@ test("sidecar stores quoted text and matches referenced wechat events when uniqu
         peer_id: "wxid_boss",
         message_id: "msg-child",
         text: "reply text",
-        in_reply_to: { text: "quoted text", source_message_id: "msg-parent", source_create_time_ms: 1779213000000 },
+        in_reply_to: {
+          text: "quoted text",
+          source_message_id: "msg-parent",
+          source_create_time_ms: 1779213000000,
+          attachments: [quotedAttachment],
+        },
       }),
     });
     assert.equal(child.status, 201);
@@ -152,6 +158,7 @@ test("sidecar stores quoted text and matches referenced wechat events when uniqu
     assert.equal(updates.body.events.length, 2);
     assert.equal(updates.body.events[1].in_reply_to.text, "quoted text");
     assert.equal(updates.body.events[1].in_reply_to.channel_message_id, updates.body.events[0].event_id);
+    assert.deepEqual(updates.body.events[1].in_reply_to.attachments, [quotedAttachment]);
   } finally {
     await sidecar.stop();
   }

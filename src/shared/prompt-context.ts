@@ -2,8 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { Agent } from "../agent/types.js";
 import type { AgentBinding } from "../daemon/db/database.js";
-import type { Envelope, EnvelopeAttachment } from "../envelope/types.js";
-import { detectAttachmentType } from "../adapters/types.js";
+import type { Envelope } from "../envelope/types.js";
 import { formatUnixMsAsTimeZoneOffset } from "./time.js";
 import { getDaemonIanaTimeZone } from "./timezone.js";
 import { HIBOSS_TOKEN_ENV } from "./env.js";
@@ -17,6 +16,7 @@ import {
 } from "./defaults.js";
 import { formatShortId } from "./id-format.js";
 import { parseAgentRoleFromMetadata } from "./agent-role.js";
+import { buildAttachmentPrompts, formatAttachmentsText } from "./attachment-prompt.js";
 import { getExecutionLanePromptContext } from "./execution-lane.js";
 import {
   buildInReplyTo,
@@ -67,35 +67,6 @@ export function readAgentCustomizationFiles(params: {
   const agentDir = getAgentDir(params.agentName, params.hibossDir);
   const soul = readOptionalFile(path.join(agentDir, "SOUL.md"));
   return { soul };
-}
-
-function displayAttachmentName(att: { source: string; filename?: string }): string | undefined {
-  if (att.filename) return att.filename;
-
-  try {
-    const url = new URL(att.source);
-    const base = path.posix.basename(url.pathname);
-    return base || undefined;
-  } catch {
-    // Not a URL; treat as local path
-  }
-
-  return path.basename(att.source) || undefined;
-}
-
-function formatAttachmentsText(attachments: EnvelopeAttachment[] | undefined): string {
-  if (!attachments?.length) return "(none)";
-
-  return attachments
-    .map((att) => {
-      const type = detectAttachmentType(att);
-      const displayName = displayAttachmentName(att);
-      if (!displayName || displayName === att.source) {
-        return `- [${type}] ${att.source}`;
-      }
-      return `- [${type}] ${displayName} (${att.source})`;
-    })
-    .join("\n");
 }
 
 function getCronScheduleId(metadata: unknown): string | null {
@@ -215,16 +186,7 @@ export function buildTurnPromptContext(params: {
   const envelopes = (params.envelopes ?? []).map((env, idx) => {
     const semantic = buildSemanticFrom(env);
     const inReplyTo = buildInReplyTo(env.metadata);
-    const attachments = (env.content.attachments ?? []).map((att) => {
-      const type = detectAttachmentType(att);
-      const displayName = displayAttachmentName(att) ?? "";
-      return {
-        type,
-        source: att.source,
-        filename: att.filename ?? "",
-        displayName,
-      };
-    });
+    const attachments = buildAttachmentPrompts(env.content.attachments);
 
     const authorLine = semantic ? withBossMarkerSuffix(semantic.authorName, env.fromBoss) : "";
     const senderLine = (() => {
@@ -306,16 +268,7 @@ export function buildCliEnvelopePromptContext(params: {
   const bossTimeZone = params.bossTimezone.trim() || getDaemonIanaTimeZone();
   const semantic = buildSemanticFrom(env);
   const inReplyTo = buildInReplyTo(env.metadata);
-  const attachments = (env.content.attachments ?? []).map((att) => {
-    const type = detectAttachmentType(att);
-    const displayName = displayAttachmentName(att) ?? "";
-    return {
-      type,
-      source: att.source,
-      filename: att.filename ?? "",
-      displayName,
-    };
-  });
+  const attachments = buildAttachmentPrompts(env.content.attachments);
 
   const deliverAtPresent = typeof env.deliverAt === "number";
   const deliverAt = deliverAtPresent

@@ -79,13 +79,17 @@ function sourceType(record: Record<string, unknown>): string | number | undefine
   return stringField(record, "type", "item_type", "itemType");
 }
 
-export function inReplyToFromItemList(raw: unknown): StoredWechatClawbotInReplyTo | undefined {
+export function quotedMessageRecordsFromItemList(raw: unknown): Record<string, unknown>[] {
   const items = Array.isArray(raw) ? raw : [];
-  for (const item of items) {
-    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+  return items.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
     const quoted = quotedMessageRecord(item as Record<string, unknown>);
-    if (!quoted) continue;
+    return quoted ? [quoted] : [];
+  });
+}
 
+export function inReplyToFromItemList(raw: unknown): StoredWechatClawbotInReplyTo | undefined {
+  for (const quoted of quotedMessageRecordsFromItemList(raw)) {
     const text = quotedText(quoted);
     const sourceMessageId = stringField(quoted, "source_message_id", "sourceMessageId", "message_id", "messageId");
     const sourceCreateTimeMs = numberField(quoted, "create_time_ms", "createTimeMs", "create_time", "createTime");
