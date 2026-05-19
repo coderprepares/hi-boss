@@ -2,7 +2,6 @@ import * as fs from "fs";
 import * as path from "path";
 
 import { resolveWechatClawbotIlinkBotToken } from "./config.js";
-import { logEvent } from "../shared/daemon-log.js";
 import {
   aesEcbPaddedSize,
   defaultWechatMediaFilename,
@@ -13,6 +12,7 @@ import {
   type WechatCdnMediaRef,
   type UploadedWechatMedia,
 } from "./media.js";
+import { traceRawMessageFields } from "./raw-field-trace.js";
 import type {
   IlinkMessage,
   StoredWechatClawbotAttachment,
@@ -42,7 +42,6 @@ const MessageItemType = {
 } as const;
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"]);
-const RAW_FIELD_TRACE_ENV = "HIBOSS_WECHAT_CLAWBOT_TRACE_RAW_FIELDS";
 
 function objectRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -119,60 +118,6 @@ function mediaRef(value: unknown): WechatCdnMediaRef | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as WechatCdnMediaRef
     : undefined;
-}
-
-function boolEnv(value: string | undefined): boolean {
-  if (!value) return false;
-  return /^(1|true|yes|on)$/i.test(value.trim());
-}
-
-function sortedObjectKeys(value: unknown): string[] {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-  return Object.keys(value).sort();
-}
-
-function summarizeRawMessageItems(itemList: unknown): Array<{
-  index: number;
-  type?: string | number;
-  keys: string[];
-  nestedKeys: Record<string, string[]>;
-}> {
-  const items = Array.isArray(itemList) ? itemList : [];
-  return items.flatMap((item, index) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-    const record = item as Record<string, unknown>;
-    const nestedKeys: Record<string, string[]> = {};
-    for (const key of Object.keys(record).sort()) {
-      const keys = sortedObjectKeys(record[key]);
-      if (keys.length > 0) nestedKeys[key] = keys;
-    }
-    const type = typeof record.type === "string" || typeof record.type === "number"
-      ? record.type
-      : stringField(record, "item_type", "itemType");
-    return [{
-      index,
-      ...(type !== undefined ? { type } : {}),
-      keys: Object.keys(record).sort(),
-      nestedKeys,
-    }];
-  });
-}
-
-function traceRawMessageFields(params: {
-  message: Record<string, unknown>;
-  messageIndex: number;
-  env?: NodeJS.ProcessEnv;
-}): void {
-  if (!boolEnv(params.env?.[RAW_FIELD_TRACE_ENV])) return;
-
-  const itemList = params.message.item_list ?? params.message.itemList;
-  const itemSummary = summarizeRawMessageItems(itemList);
-  logEvent("info", "wechat-clawbot-raw-message-fields", {
-    "message-index": params.messageIndex,
-    "message-keys": sortedObjectKeys(params.message),
-    "item-count": itemSummary.length,
-    "item-summary": itemSummary,
-  });
 }
 
 async function attachmentsFromItemList(params: {
