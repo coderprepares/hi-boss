@@ -99,6 +99,61 @@ test("iLink client accepts numeric message ids from real iLink updates", async (
   assert.equal(result.messages[0].text, "测试2");
 });
 
+test("iLink client traces raw message field keys without sensitive values", async () => {
+  const writes: string[] = [];
+  const originalWrite = process.stdout.write;
+  (process.stdout.write as any) = (chunk: unknown, ...args: unknown[]) => {
+    writes.push(String(chunk));
+    const callback = args.find((arg): arg is () => void => typeof arg === "function");
+    callback?.();
+    return true;
+  };
+
+  try {
+    const client = new WechatClawbotIlinkClient({
+      apiBaseUrl: "https://ilink.example.test",
+      cdnBaseUrl: "https://cdn.example.test/c2c",
+      mediaDir: tempMediaDir(),
+      requestTimeoutMs: 1000,
+      env: {
+        ILINK_TOKEN: "test-bot-token",
+        HIBOSS_WECHAT_CLAWBOT_TRACE_RAW_FIELDS: "true",
+      },
+      fetchImpl: async () => new Response(JSON.stringify({
+        get_updates_buf: "cursor-2",
+        msgs: [{
+          message_id: "msg-quoted",
+          from_user_id: "wxid_boss",
+          context_token: "secret-context-token",
+          item_list: [{
+            type: 1,
+            text_item: { text: "sensitive message body" },
+            quote_item: {
+              source_message_id: "quoted-message-id",
+              text: "quoted sensitive text",
+            },
+          }],
+        }],
+      }), { status: 200 }),
+    });
+
+    await client.fetchUpdates({
+      accountId: "acct",
+      botTokenEnv: "ILINK_TOKEN",
+    }, "cursor-1");
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+
+  const output = writes.join("");
+  assert.match(output, /event=wechat-clawbot-raw-message-fields/);
+  assert.match(output, /quote_item/);
+  assert.match(output, /source_message_id/);
+  assert.doesNotMatch(output, /secret-context-token/);
+  assert.doesNotMatch(output, /sensitive message body/);
+  assert.doesNotMatch(output, /quoted sensitive text/);
+});
+
 test("iLink client downloads image and file updates into local attachments", async () => {
   const mediaDir = tempMediaDir();
   const key = crypto.randomBytes(16);

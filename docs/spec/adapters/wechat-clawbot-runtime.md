@@ -65,3 +65,18 @@ single source chat when all read envelopes come from the same
 `channel:wechat-clawbot:<account-id>/<peer-id>` address. Typing starts on
 `turn.started`, repeats periodically while the run is active, and stops on
 `turn.completed` or final run cleanup.
+
+## Raw Field Trace
+
+Set `HIBOSS_WECHAT_CLAWBOT_TRACE_RAW_FIELDS=true` on the sidecar process to log
+raw iLink message field names for protocol investigation.
+
+The trace logs:
+- top-level raw message keys;
+- `item_list` item keys;
+- nested object keys below each item, such as `text_item`, `file_item`, or
+  quote-like fields when iLink returns them.
+
+The trace must not print raw field values, message text, media URLs, bot tokens,
+or `context_token` values. It is intended for short live probes, such as
+checking whether quoted WeChat messages expose reply/quote metadata.
