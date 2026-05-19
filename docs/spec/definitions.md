@@ -389,6 +389,7 @@ Sidecar operations are documented in `docs/spec/adapters/wechat-clawbot-operatio
 
 `hiboss-wechat-clawbot-sidecar monitor` prints:
 - `ok:`
+- `run-at:`
 - `monitor-status:` (`ok|alert|suppressed|notify-error`)
 - `doctor-status:` (`ok|warn|error`)
 - `notified:`
@@ -410,6 +411,7 @@ Sidecar operations are documented in `docs/spec/adapters/wechat-clawbot-operatio
 
 `hiboss-wechat-clawbot-sidecar monitor-status` prints:
 - `ok:`
+- `max-age-minutes:`
 - `cron-file:`
 - `cron-file-exists:`
 - `cron-command-present:`
@@ -418,6 +420,8 @@ Sidecar operations are documented in `docs/spec/adapters/wechat-clawbot-operatio
 - `log-file:`
 - `log-file-exists:`
 - `last-run-at:`
+- `last-run-fresh:`
+- `last-run-age-seconds:`
 - `last-monitor-status:` (`ok|alert|suppressed|notify-error`, or `(none)`)
 - `last-doctor-status:` (`ok|warn|error`, or `(none)`)
 - `last-notified:`

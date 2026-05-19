@@ -78,6 +78,7 @@ test("wechat sidecar monitor stays quiet when doctor is ok", async () => {
   assert.equal(result.ok, true);
   assert.equal(result.monitorStatus, "ok");
   assert.equal(result.notified, false);
+  assert.match(result.runAt, /^\d{4}-\d{2}-\d{2}T/);
   assert.match(formatWechatClawbotMonitorResult(result), /monitor-status: ok/);
 });
 
@@ -175,6 +176,7 @@ test("wechat sidecar monitor status reports installed cron health", (t) => {
     logFile,
     [
       "ok: true",
+      "run-at: 2026-05-19T14:00:00.000Z",
       "monitor-status: ok",
       "doctor-status: ok",
       "notified: false",
@@ -186,17 +188,65 @@ test("wechat sidecar monitor status reports installed cron health", (t) => {
   const result = runWechatClawbotMonitorStatus({
     cronFile,
     logFile,
+    nowMs: Date.parse("2026-05-19T14:05:00.000Z"),
     cronActiveImpl: () => true,
   });
 
   assert.equal(result.ok, true);
+  assert.equal(result.maxAgeMinutes, 15);
   assert.equal(result.cronCommandPresent, true);
   assert.equal(result.cronNotifyTargetConfigured, true);
+  assert.equal(result.lastRunFresh, true);
+  assert.equal(result.lastRunAgeSeconds, 300);
   assert.equal(result.lastMonitorStatus, "ok");
   assert.equal(result.lastIssueCount, "0");
   const output = formatWechatClawbotMonitorStatusResult(result);
   assert.match(output, /cron-active: true/);
+  assert.match(output, /last-run-fresh: true/);
   assert.match(output, /last-monitor-status: ok/);
+});
+
+test("wechat sidecar monitor status uses latest log block and rejects stale runs", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hiboss-monitor-status-stale-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const cronFile = path.join(dir, "monitor.cron");
+  const logFile = path.join(dir, "monitor.log");
+  fs.writeFileSync(
+    cronFile,
+    "*/5 * * * * root hiboss-wechat-clawbot-sidecar monitor --notify-to channel:telegram:123 >> /tmp/log 2>&1\n"
+  );
+  fs.writeFileSync(
+    logFile,
+    [
+      "ok: false",
+      "run-at: 2026-05-19T13:00:00.000Z",
+      "monitor-status: alert",
+      "doctor-status: warn",
+      "notified: true",
+      "issue-count: 1",
+      "ok: true",
+      "run-at: 2026-05-19T14:00:00.000Z",
+      "monitor-status: ok",
+      "doctor-status: ok",
+      "notified: false",
+      "issue-count: 0",
+      "",
+    ].join("\n")
+  );
+
+  const result = runWechatClawbotMonitorStatus({
+    cronFile,
+    logFile,
+    maxAgeMinutes: 15,
+    nowMs: Date.parse("2026-05-19T14:20:01.000Z"),
+    cronActiveImpl: () => true,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.lastRunFresh, false);
+  assert.equal(result.lastRunAgeSeconds, 1201);
+  assert.equal(result.lastMonitorStatus, "ok");
+  assert.equal(result.lastIssueCount, "0");
 });
 
 test("wechat sidecar monitor status parses file flags", () => {
@@ -207,9 +257,12 @@ test("wechat sidecar monitor status parses file flags", () => {
     "/etc/cron.d/test",
     "--log-file",
     "/var/log/test.log",
+    "--max-age-minutes",
+    "30",
   ]), {
     hibossDir: "/var/lib/hiboss",
     cronFile: "/etc/cron.d/test",
     logFile: "/var/log/test.log",
+    maxAgeMinutes: 30,
   });
 });

@@ -142,6 +142,7 @@ Monitor output is parseable key/value text:
 
 ```text
 ok: true|false
+run-at: 2026-05-19T14:38:54.551Z
 monitor-status: ok|alert|suppressed|notify-error
 doctor-status: ok|warn|error
 notified: true|false
@@ -165,10 +166,15 @@ Check whether the cron monitor is installed and recently healthy with:
 hiboss-wechat-clawbot-sidecar monitor-status
 ```
 
+By default, `monitor-status` requires the last monitor log block to be no older
+than 15 minutes. Override this with `--max-age-minutes <n>` when the cron
+interval is longer.
+
 Status output is parseable key/value text:
 
 ```text
 ok: true|false
+max-age-minutes: 15
 cron-file: /etc/cron.d/hiboss-wechat-clawbot-monitor
 cron-file-exists: true|false
 cron-command-present: true|false|(none)
@@ -177,6 +183,8 @@ cron-active: true|false|unknown
 log-file: /var/log/hiboss-wechat-clawbot-monitor.log
 log-file-exists: true|false
 last-run-at: 2026-05-19T14:00:00.000Z
+last-run-fresh: true|false|(none)
+last-run-age-seconds: 300
 last-monitor-status: ok|alert|suppressed|notify-error|(none)
 last-doctor-status: ok|warn|error|(none)
 last-notified: true|false|(none)

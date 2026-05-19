@@ -26,6 +26,7 @@ export interface WechatClawbotMonitorCliOptions {
 
 export interface WechatClawbotMonitorResult {
   ok: boolean;
+  runAt: string;
   monitorStatus: "ok" | "alert" | "suppressed" | "notify-error";
   doctor: WechatClawbotDoctorResult;
   notified: boolean;
@@ -46,10 +47,12 @@ export interface WechatClawbotMonitorStatusCliOptions {
   hibossDir?: string;
   cronFile?: string;
   logFile?: string;
+  maxAgeMinutes?: number;
 }
 
 export interface WechatClawbotMonitorStatusResult {
   ok: boolean;
+  maxAgeMinutes: number;
   cronFile: string;
   cronFileExists: boolean;
   cronCommandPresent?: boolean;
@@ -58,6 +61,8 @@ export interface WechatClawbotMonitorStatusResult {
   logFile: string;
   logFileExists: boolean;
   lastRunAt?: string;
+  lastRunFresh?: boolean;
+  lastRunAgeSeconds?: number;
   lastMonitorStatus?: string;
   lastDoctorStatus?: string;
   lastNotified?: string;
@@ -65,6 +70,7 @@ export interface WechatClawbotMonitorStatusResult {
 }
 
 export interface WechatClawbotMonitorStatusOptions extends WechatClawbotMonitorStatusCliOptions {
+  nowMs?: number;
   cronActiveImpl?: () => boolean | "unknown";
 }
 
@@ -76,6 +82,7 @@ interface CooldownState {
 const DEFAULT_COOLDOWN_MS = 60 * 60 * 1000;
 const DEFAULT_CRON_FILE = "/etc/cron.d/hiboss-wechat-clawbot-monitor";
 const DEFAULT_LOG_FILE = "/var/log/hiboss-wechat-clawbot-monitor.log";
+const DEFAULT_MONITOR_STATUS_MAX_AGE_MINUTES = 15;
 
 function valueOrNone(value: unknown): string {
   return value === undefined || value === null || value === "" ? "(none)" : String(value);
@@ -85,6 +92,12 @@ function parseNonNegativeInt(value: string | undefined, label: string): number {
   if (!value || !/^\d+$/.test(value)) throw new Error(`${label} requires a non-negative integer`);
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed)) throw new Error(`${label} is too large`);
+  return parsed;
+}
+
+function parsePositiveInt(value: string | undefined, label: string): number {
+  const parsed = parseNonNegativeInt(value, label);
+  if (parsed < 1) throw new Error(`${label} requires a positive integer`);
   return parsed;
 }
 
@@ -119,7 +132,7 @@ function parseLastKeyValueBlock(content: string): Record<string, string> {
     }
     const index = line.indexOf(": ");
     const key = line.slice(0, index);
-    if (/^[a-z0-9-]+$/.test(key)) result[key] = line.slice(index + 2);
+    if (/^[a-z0-9-]+$/.test(key) && result[key] === undefined) result[key] = line.slice(index + 2);
   }
   return result;
 }
@@ -206,6 +219,7 @@ export async function runWechatClawbotMonitor(options: WechatClawbotMonitorOptio
   const doctor = await runWechatClawbotDoctor(options);
   const alert = doctor.issues.length > 0;
   const nowMs = options.nowMs ?? Date.now();
+  const runAt = new Date(nowMs).toISOString();
   const cooldownMs = options.cooldownMs ?? DEFAULT_COOLDOWN_MS;
   const cooldownFile = options.cooldownFile ?? defaultCooldownFile(options.hibossDir);
   const fingerprint = alert ? alertFingerprint(doctor) : undefined;
@@ -220,7 +234,7 @@ export async function runWechatClawbotMonitor(options: WechatClawbotMonitorOptio
   );
 
   if (!alert) {
-    return { ok: true, monitorStatus: "ok", doctor, notified: false, dryRun: Boolean(options.dryRun), cooldownActive: false, cooldownFile };
+    return { ok: true, runAt, monitorStatus: "ok", doctor, notified: false, dryRun: Boolean(options.dryRun), cooldownActive: false, cooldownFile };
   }
 
   const cooldownUntil = cooldownActive && lastNotifiedAt !== undefined
@@ -229,6 +243,7 @@ export async function runWechatClawbotMonitor(options: WechatClawbotMonitorOptio
   if (cooldownActive) {
     return {
       ok: false,
+      runAt,
       monitorStatus: "suppressed",
       doctor,
       notified: false,
@@ -240,7 +255,7 @@ export async function runWechatClawbotMonitor(options: WechatClawbotMonitorOptio
   }
 
   if (options.dryRun || !options.notifyTo) {
-    return { ok: false, monitorStatus: "alert", doctor, notified: false, dryRun: Boolean(options.dryRun), cooldownActive, cooldownFile };
+    return { ok: false, runAt, monitorStatus: "alert", doctor, notified: false, dryRun: Boolean(options.dryRun), cooldownActive, cooldownFile };
   }
 
   try {
@@ -251,6 +266,7 @@ export async function runWechatClawbotMonitor(options: WechatClawbotMonitorOptio
     writeCooldown(cooldownFile, { fingerprint, notifiedAt: nowMs });
     return {
       ok: false,
+      runAt,
       monitorStatus: "alert",
       doctor,
       notified: true,
@@ -262,6 +278,7 @@ export async function runWechatClawbotMonitor(options: WechatClawbotMonitorOptio
   } catch (err) {
     return {
       ok: false,
+      runAt,
       monitorStatus: "notify-error",
       doctor,
       notified: false,
@@ -276,6 +293,7 @@ export async function runWechatClawbotMonitor(options: WechatClawbotMonitorOptio
 export function formatWechatClawbotMonitorResult(result: WechatClawbotMonitorResult): string {
   const lines = [
     `ok: ${result.ok ? "true" : "false"}`,
+    `run-at: ${result.runAt}`,
     `monitor-status: ${result.monitorStatus}`,
     `doctor-status: ${result.doctor.status}`,
     `notified: ${result.notified ? "true" : "false"}`,
@@ -340,6 +358,7 @@ export function parseWechatClawbotMonitorCliArgs(args: string[]): WechatClawbotM
 export function runWechatClawbotMonitorStatus(options: WechatClawbotMonitorStatusOptions = {}): WechatClawbotMonitorStatusResult {
   const cronFile = options.cronFile ?? DEFAULT_CRON_FILE;
   const logFile = options.logFile ?? DEFAULT_LOG_FILE;
+  const maxAgeMinutes = options.maxAgeMinutes ?? DEFAULT_MONITOR_STATUS_MAX_AGE_MINUTES;
   const cronFileExists = fs.existsSync(cronFile);
   const logFileExists = fs.existsSync(logFile);
   const cronText = cronFileExists ? fs.readFileSync(cronFile, "utf8") : "";
@@ -350,6 +369,18 @@ export function runWechatClawbotMonitorStatus(options: WechatClawbotMonitorStatu
   const cronActive = options.cronActiveImpl ? options.cronActiveImpl() : probeCronActive();
   const logStats = logFileExists ? fs.statSync(logFile) : undefined;
   const last = logFileExists ? parseLastKeyValueBlock(fs.readFileSync(logFile, "utf8")) : {};
+  const parsedRunAtMs = last["run-at"] ? Date.parse(last["run-at"]) : Number.NaN;
+  const lastRunAt = Number.isFinite(parsedRunAtMs)
+    ? new Date(parsedRunAtMs).toISOString()
+    : logStats ? logStats.mtime.toISOString() : undefined;
+  const lastRunMs = lastRunAt ? Date.parse(lastRunAt) : Number.NaN;
+  const nowMs = options.nowMs ?? Date.now();
+  const lastRunAgeSeconds = Number.isFinite(lastRunMs)
+    ? Math.max(0, Math.floor((nowMs - lastRunMs) / 1000))
+    : undefined;
+  const lastRunFresh = lastRunAgeSeconds === undefined
+    ? undefined
+    : lastRunAgeSeconds <= maxAgeMinutes * 60;
   const lastIssueCount = last["issue-count"];
   const lastOk = last["monitor-status"] === "ok" && lastIssueCount === "0";
   const ok = Boolean(
@@ -358,11 +389,13 @@ export function runWechatClawbotMonitorStatus(options: WechatClawbotMonitorStatu
       cronNotifyTargetConfigured &&
       cronActive === true &&
       logFileExists &&
+      lastRunFresh === true &&
       lastOk
   );
 
   return {
     ok,
+    maxAgeMinutes,
     cronFile,
     cronFileExists,
     cronCommandPresent,
@@ -370,7 +403,9 @@ export function runWechatClawbotMonitorStatus(options: WechatClawbotMonitorStatu
     cronActive,
     logFile,
     logFileExists,
-    lastRunAt: logStats ? logStats.mtime.toISOString() : undefined,
+    lastRunAt,
+    lastRunFresh,
+    lastRunAgeSeconds,
     lastMonitorStatus: last["monitor-status"],
     lastDoctorStatus: last["doctor-status"],
     lastNotified: last.notified,
@@ -381,6 +416,7 @@ export function runWechatClawbotMonitorStatus(options: WechatClawbotMonitorStatu
 export function formatWechatClawbotMonitorStatusResult(result: WechatClawbotMonitorStatusResult): string {
   return [
     `ok: ${result.ok ? "true" : "false"}`,
+    `max-age-minutes: ${result.maxAgeMinutes}`,
     `cron-file: ${result.cronFile}`,
     `cron-file-exists: ${result.cronFileExists ? "true" : "false"}`,
     `cron-command-present: ${valueOrNone(result.cronCommandPresent)}`,
@@ -389,6 +425,8 @@ export function formatWechatClawbotMonitorStatusResult(result: WechatClawbotMoni
     `log-file: ${result.logFile}`,
     `log-file-exists: ${result.logFileExists ? "true" : "false"}`,
     `last-run-at: ${valueOrNone(result.lastRunAt)}`,
+    `last-run-fresh: ${valueOrNone(result.lastRunFresh)}`,
+    `last-run-age-seconds: ${valueOrNone(result.lastRunAgeSeconds)}`,
     `last-monitor-status: ${valueOrNone(result.lastMonitorStatus)}`,
     `last-doctor-status: ${valueOrNone(result.lastDoctorStatus)}`,
     `last-notified: ${valueOrNone(result.lastNotified)}`,
@@ -409,6 +447,8 @@ export function parseWechatClawbotMonitorStatusCliArgs(args: string[]): WechatCl
     } else if (arg === "--log-file") {
       result.logFile = args[++index];
       if (!result.logFile) throw new Error("--log-file requires a value");
+    } else if (arg === "--max-age-minutes") {
+      result.maxAgeMinutes = parsePositiveInt(args[++index], "--max-age-minutes");
     } else {
       throw new Error(`Unknown arguments: ${args.slice(index).join(" ")}`);
     }

@@ -25,7 +25,7 @@ function printUsage(): void {
   hiboss-wechat-clawbot-sidecar [--config ./sidecar.json]
   hiboss-wechat-clawbot-sidecar doctor [--config ./sidecar.json] [--hiboss-dir /var/lib/hiboss] [--agent nex]
   hiboss-wechat-clawbot-sidecar monitor [--config ./sidecar.json] [--hiboss-dir /var/lib/hiboss] [--agent nex] [--notify-to channel:telegram:...]
-  hiboss-wechat-clawbot-sidecar monitor-status [--cron-file /etc/cron.d/hiboss-wechat-clawbot-monitor] [--log-file /var/log/hiboss-wechat-clawbot-monitor.log]
+  hiboss-wechat-clawbot-sidecar monitor-status [--cron-file /etc/cron.d/hiboss-wechat-clawbot-monitor] [--log-file /var/log/hiboss-wechat-clawbot-monitor.log] [--max-age-minutes 15]
   hiboss-wechat-clawbot-sidecar login [--config ./sidecar.json]
   hiboss-wechat-clawbot-sidecar login-help
 
@@ -33,7 +33,7 @@ Source checkout equivalent:
   npm run wechat-clawbot-sidecar -- [--config ./sidecar.json]
   npm run wechat-clawbot-sidecar -- doctor [--config ./sidecar.json] [--hiboss-dir /var/lib/hiboss] [--agent nex]
   npm run wechat-clawbot-sidecar -- monitor [--config ./sidecar.json] [--hiboss-dir /var/lib/hiboss] [--agent nex] [--notify-to channel:telegram:...]
-  npm run wechat-clawbot-sidecar -- monitor-status [--cron-file /etc/cron.d/hiboss-wechat-clawbot-monitor] [--log-file /var/log/hiboss-wechat-clawbot-monitor.log]
+  npm run wechat-clawbot-sidecar -- monitor-status [--cron-file /etc/cron.d/hiboss-wechat-clawbot-monitor] [--log-file /var/log/hiboss-wechat-clawbot-monitor.log] [--max-age-minutes 15]
   npm run wechat-clawbot-sidecar -- login [--config ./sidecar.json]
   npm run wechat-clawbot-sidecar -- login-help
 
