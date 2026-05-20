@@ -251,12 +251,14 @@ test("iLink client traces raw message field keys without sensitive values", asyn
   assert.doesNotMatch(output, /quoted sensitive text/);
 });
 
-test("iLink client downloads image and file updates into local attachments", async () => {
+test("iLink client downloads image, video, and file updates into local attachments", async () => {
   const mediaDir = tempMediaDir();
   const key = crypto.randomBytes(16);
   const imagePlaintext = Buffer.from("image-bytes");
+  const videoPlaintext = Buffer.from("video-bytes");
   const filePlaintext = Buffer.from("file-bytes");
   const encryptedImage = encryptAes128Ecb(imagePlaintext, key);
+  const encryptedVideo = encryptAes128Ecb(videoPlaintext, key);
   const encryptedFile = encryptAes128Ecb(filePlaintext, key);
   const client = new WechatClawbotIlinkClient({
     apiBaseUrl: "https://ilink.example.test",
@@ -268,6 +270,9 @@ test("iLink client downloads image and file updates into local attachments", asy
       const url = String(input);
       if (url === "https://cdn.example.test/image") {
         return new Response(new Uint8Array(encryptedImage), { status: 200 });
+      }
+      if (url === "https://cdn.example.test/video") {
+        return new Response(new Uint8Array(encryptedVideo), { status: 200 });
       }
       if (url === "https://cdn.example.test/file") {
         return new Response(new Uint8Array(encryptedFile), { status: 200 });
@@ -283,6 +288,12 @@ test("iLink client downloads image and file updates into local attachments", asy
             image_item: {
               aeskey: key.toString("hex"),
               media: { full_url: "https://cdn.example.test/image" },
+            },
+          }, {
+            type: 5,
+            video_item: {
+              aeskey: key.toString("hex"),
+              media: { full_url: "https://cdn.example.test/video" },
             },
           }, {
             type: 4,
@@ -306,10 +317,12 @@ test("iLink client downloads image and file updates into local attachments", asy
 
   assert.equal(result.messages.length, 1);
   assert.equal(result.messages[0].text, undefined);
-  assert.equal(result.messages[0].attachments?.length, 2);
-  const [image, file] = result.messages[0].attachments!;
+  assert.equal(result.messages[0].attachments?.length, 3);
+  const [image, video, file] = result.messages[0].attachments!;
   assert.equal(image.filename, "wechat-image-msg-image-0.jpg");
   assert.equal(fs.readFileSync(image.source, "utf8"), "image-bytes");
+  assert.equal(video.filename, "wechat-video-msg-image-1.mp4");
+  assert.equal(fs.readFileSync(video.source, "utf8"), "video-bytes");
   assert.equal(file.filename, "report.pdf");
   assert.equal(fs.readFileSync(file.source, "utf8"), "file-bytes");
 });
@@ -381,11 +394,13 @@ test("iLink client gets config and sends typing with ticket", async () => {
   assert.equal(requests[1].body.status, 1);
 });
 
-test("iLink client uploads and sends outbound image and file attachments", async () => {
+test("iLink client uploads and sends outbound image, video, and file attachments", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wechat-clawbot-outbound-"));
   const imagePath = path.join(dir, "image.jpg");
+  const videoPath = path.join(dir, "clip.mp4");
   const filePath = path.join(dir, "report.pdf");
   fs.writeFileSync(imagePath, "image-bytes");
+  fs.writeFileSync(videoPath, "video-bytes");
   fs.writeFileSync(filePath, "file-bytes");
   const requests: Array<{ url: string; body?: any }> = [];
   const client = new WechatClawbotIlinkClient({
@@ -420,18 +435,22 @@ test("iLink client uploads and sends outbound image and file attachments", async
     text: "caption",
     attachments: [
       { source: imagePath, filename: "image.jpg" },
+      { source: videoPath, filename: "clip.mp4" },
       { source: filePath, filename: "report.pdf" },
     ],
   });
 
   const uploadRequests = requests.filter((request) => request.url.endsWith("/ilink/bot/getuploadurl"));
-  assert.equal(uploadRequests.length, 2);
+  assert.equal(uploadRequests.length, 3);
   assert.equal(uploadRequests[0].body.media_type, 1);
-  assert.equal(uploadRequests[1].body.media_type, 3);
+  assert.equal(uploadRequests[1].body.media_type, 2);
+  assert.equal(uploadRequests[2].body.media_type, 3);
   const sendRequests = requests.filter((request) => request.url.endsWith("/ilink/bot/sendmessage"));
-  assert.equal(sendRequests.length, 3);
+  assert.equal(sendRequests.length, 4);
   assert.equal(sendRequests[0].body.msg.item_list[0].type, 1);
   assert.equal(sendRequests[1].body.msg.item_list[0].type, 2);
-  assert.equal(sendRequests[2].body.msg.item_list[0].type, 4);
-  assert.equal(sendRequests[2].body.msg.item_list[0].file_item.file_name, "report.pdf");
+  assert.equal(sendRequests[2].body.msg.item_list[0].type, 5);
+  assert.equal(typeof sendRequests[2].body.msg.item_list[0].video_item.video_size, "number");
+  assert.equal(sendRequests[3].body.msg.item_list[0].type, 4);
+  assert.equal(sendRequests[3].body.msg.item_list[0].file_item.file_name, "report.pdf");
 });

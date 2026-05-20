@@ -91,11 +91,13 @@ function uniquePath(dir: string, filename: string): string {
 export function defaultWechatMediaFilename(params: {
   messageId: string;
   itemIndex: number;
-  kind: "image" | "file";
+  kind: "image" | "video" | "file";
   filename?: string;
 }): string {
   const fallback = params.kind === "image"
     ? `wechat-image-${params.messageId}-${params.itemIndex}.jpg`
+    : params.kind === "video"
+      ? `wechat-video-${params.messageId}-${params.itemIndex}.mp4`
     : `wechat-file-${params.messageId}-${params.itemIndex}.bin`;
   return safeFilename(params.filename ?? fallback, fallback);
 }

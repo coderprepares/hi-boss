@@ -33,16 +33,19 @@ interface IlinkClientOptions {
 
 const UploadMediaType = {
   IMAGE: 1,
+  VIDEO: 2,
   FILE: 3,
 } as const;
 
 const MessageItemType = {
   TEXT: 1,
   IMAGE: 2,
+  VIDEO: 5,
   FILE: 4,
 } as const;
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"]);
+const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"]);
 
 function objectRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -84,13 +87,22 @@ function normalizeBaseUrl(raw: string): string {
   return url.toString().replace(/\/$/, "");
 }
 
-function detectOutboundKind(attachment: StoredWechatClawbotAttachment): "image" | "file" {
+function detectOutboundKind(attachment: StoredWechatClawbotAttachment): "image" | "video" | "file" {
   const ext = path.extname(attachment.filename ?? attachment.source).toLowerCase();
-  return IMAGE_EXTENSIONS.has(ext) ? "image" : "file";
+  if (IMAGE_EXTENSIONS.has(ext)) return "image";
+  return VIDEO_EXTENSIONS.has(ext) ? "video" : "file";
 }
 
 function uploadAesKeyForMessage(aeskeyHex: string): string {
   return Buffer.from(aeskeyHex).toString("base64");
+}
+
+function uploadedMediaRef(uploaded: UploadedWechatMedia): Record<string, string | number> {
+  return {
+    encrypt_query_param: uploaded.downloadEncryptedQueryParam,
+    aes_key: uploadAesKeyForMessage(uploaded.aeskeyHex),
+    encrypt_type: 1,
+  };
 }
 
 function randomWechatUin(): string {
@@ -120,9 +132,13 @@ async function attachmentsFromItemList(params: {
     const record = item as Record<string, unknown>;
     const itemType = stringField(record, "type", "item_type", "itemType")?.toUpperCase();
     const numericType = numberField(record, "type");
-    const type = numericType ?? (itemType === "IMAGE" ? 2 : itemType === "FILE" ? 4 : undefined);
+    const type = numericType ?? (
+      itemType === "IMAGE" ? MessageItemType.IMAGE :
+      itemType === "VIDEO" ? MessageItemType.VIDEO :
+      itemType === "FILE" ? MessageItemType.FILE : undefined
+    );
 
-    if (type === 2 && record.image_item && typeof record.image_item === "object") {
+    if (type === MessageItemType.IMAGE && record.image_item && typeof record.image_item === "object") {
       const image = record.image_item as Record<string, unknown>;
       const media = mediaRef(image.media) ?? mediaRef(image.thumb_media);
       if (!media) continue;
@@ -137,7 +153,22 @@ async function attachmentsFromItemList(params: {
       if (attachment) result.push(attachment);
     }
 
-    if (type === 4 && record.file_item && typeof record.file_item === "object") {
+    if (type === MessageItemType.VIDEO && record.video_item && typeof record.video_item === "object") {
+      const video = record.video_item as Record<string, unknown>;
+      const media = mediaRef(video.media);
+      if (!media) continue;
+      const attachment = await downloadWechatCdnMedia({
+        media,
+        mediaDir: params.mediaDir,
+        filename: defaultWechatMediaFilename({ messageId: params.messageId, itemIndex: index, kind: "video" }),
+        aesKey: stringField(video, "aeskey", "aes_key"),
+        fetchImpl: params.fetchImpl,
+        requestTimeoutMs: params.requestTimeoutMs,
+      });
+      if (attachment) result.push(attachment);
+    }
+
+    if (type === MessageItemType.FILE && record.file_item && typeof record.file_item === "object") {
       const file = record.file_item as Record<string, unknown>;
       const media = mediaRef(file.media);
       if (!media) continue;
@@ -332,27 +363,28 @@ export class WechatClawbotIlinkClient {
     for (const attachment of attachments) {
       const uploaded = await this.uploadAttachment(account, peerId, attachment);
       const kind = detectOutboundKind(attachment);
+      const media = uploadedMediaRef(uploaded);
       if (kind === "image") {
         await this.postSendMessage(account, peerId, contextToken, [{
           type: MessageItemType.IMAGE,
           image_item: {
-            media: {
-              encrypt_query_param: uploaded.downloadEncryptedQueryParam,
-              aes_key: uploadAesKeyForMessage(uploaded.aeskeyHex),
-              encrypt_type: 1,
-            },
+            media,
             mid_size: uploaded.ciphertextSize,
+          },
+        }]);
+      } else if (kind === "video") {
+        await this.postSendMessage(account, peerId, contextToken, [{
+          type: MessageItemType.VIDEO,
+          video_item: {
+            media,
+            video_size: uploaded.ciphertextSize,
           },
         }]);
       } else {
         await this.postSendMessage(account, peerId, contextToken, [{
           type: MessageItemType.FILE,
           file_item: {
-            media: {
-              encrypt_query_param: uploaded.downloadEncryptedQueryParam,
-              aes_key: uploadAesKeyForMessage(uploaded.aeskeyHex),
-              encrypt_type: 1,
-            },
+            media,
             file_name: path.basename(attachment.filename ?? attachment.source),
             len: String(uploaded.rawSize),
           },
@@ -373,7 +405,8 @@ export class WechatClawbotIlinkClient {
     const kind = detectOutboundKind(attachment);
     const uploadUrl = await this.post(account, "/ilink/bot/getuploadurl", {
       filekey,
-      media_type: kind === "image" ? UploadMediaType.IMAGE : UploadMediaType.FILE,
+      media_type: kind === "image" ? UploadMediaType.IMAGE :
+        kind === "video" ? UploadMediaType.VIDEO : UploadMediaType.FILE,
       to_user_id: peerId,
       rawsize: rawSize,
       rawfilemd5: md5Hex(plaintext),
