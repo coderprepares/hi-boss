@@ -47,7 +47,7 @@ cron-id: <id>                     # only when present (short id)
 Then the body is printed as plain text (or `(none)`), followed by an `attachments:` block only when present.
 
 Notes:
-- Reply targets: use the incoming `from:` as `--to`. Use `--reply-to <envelope-id>` when you need thread context or channel quoting.
+- Reply targets: use the incoming `from:` as `--to`. Use `--reply-to <envelope-id>` when you need thread context or Telegram quoting.
 - The boss signal is the `[boss]` suffix (not a `from-boss:` output key).
 - Each pending envelope is rendered one-by-one (no batching).
 

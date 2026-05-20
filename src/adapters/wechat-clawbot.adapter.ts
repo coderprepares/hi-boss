@@ -83,9 +83,9 @@ export class WechatClawbotAdapter implements ChatAdapter {
     this.commandHandlers.push(handler);
   }
 
-  async sendMessage(chatId: string, content: MessageContent, options: SendMessageOptions = {}): Promise<void> {
+  async sendMessage(chatId: string, content: MessageContent, _options: SendMessageOptions = {}): Promise<void> {
     const target = parseWechatClawbotChatId(chatId, this.config.defaultAccount);
-    await this.client.sendText(target, content, options);
+    await this.client.sendText(target, content);
   }
 
   async handleCommand(command: ChannelCommand): Promise<MessageContent | void> {

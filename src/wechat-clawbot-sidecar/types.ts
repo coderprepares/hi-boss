@@ -56,12 +56,6 @@ export interface StoredWechatClawbotAttachment {
   filename?: string;
 }
 
-export interface StoredWechatClawbotReplyReference {
-  message_id?: string;
-  create_time_ms?: number;
-  text: string;
-}
-
 export interface WechatClawbotPeerState {
   account_id: string;
   peer_id: string;

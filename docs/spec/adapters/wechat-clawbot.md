@@ -458,7 +458,7 @@ and recommended multi-account rollout.
 1. Agent sends an envelope to `channel:wechat-clawbot:<account-id>/<peer-id>`.
 2. Router verifies the sender agent has a `wechat-clawbot` binding.
 3. Adapter calls sidecar `POST /accounts/:accountId/peers/:peerId/messages`.
-4. Sidecar sends text via `sendmessage`; when `replyToMessageId` resolves to a stored text event, the first text item carries best-effort `ref_msg`; image/file attachments are AES-encrypted and sent as iLink CDN media items.
+4. Sidecar sends text via `sendmessage`; image/file attachments are AES-encrypted and sent as iLink CDN media items.
 5. If iLink text send fails after a context exists, sidecar queues the outbound
    text and flushes it after the next inbound peer message refreshes the context.
 

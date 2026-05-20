@@ -7,7 +7,6 @@ import {
   SidecarHttpError,
   type IncomingWechatClawbotEvent,
   type StoredWechatClawbotAttachment,
-  type StoredWechatClawbotReplyReference,
   type WechatClawbotIlinkAccountConfig,
   type WechatClawbotSidecarConfig,
   type WechatClawbotSidecarRuntimeOptions,
@@ -245,11 +244,7 @@ export class WechatClawbotSidecarServer {
       const body = await readJsonBody(req);
       const text = typeof body.text === "string" ? body.text : "";
       const attachments = normalizeBodyAttachments(body);
-      const replyToMessageId = stringField(body, "reply_to_message_id", "replyToMessageId");
-      const replyTo = replyToMessageId
-        ? this.store.findOutgoingReplyReference(sendTarget.accountId, sendTarget.peerId, replyToMessageId)
-        : undefined;
-      const sent = await this.sendMessage(sendTarget.accountId, sendTarget.peerId, { text, attachments, replyTo });
+      const sent = await this.sendMessage(sendTarget.accountId, sendTarget.peerId, { text, attachments });
       json(res, 200, { ok: true, message_id: sent.id });
       return;
     }
@@ -342,11 +337,7 @@ export class WechatClawbotSidecarServer {
   private async sendMessage(
     accountId: string,
     peerId: string,
-    content: {
-      text: string;
-      attachments: StoredWechatClawbotAttachment[];
-      replyTo?: StoredWechatClawbotReplyReference;
-    }
+    content: { text: string; attachments: StoredWechatClawbotAttachment[] }
   ) {
     const trimmed = content.text.trim();
     const attachments = content.attachments;
@@ -374,11 +365,7 @@ export class WechatClawbotSidecarServer {
       );
     }
     try {
-      await this.ilink.sendMessage(account, peerId, contextToken, {
-        text: trimmed,
-        attachments,
-        replyTo: content.replyTo,
-      });
+      await this.ilink.sendMessage(account, peerId, contextToken, { text: trimmed, attachments });
     } catch (err) {
       if (attachments.length === 0) {
         this.store.recordPendingOutbound(accountId, peerId, trimmed, "send-failed", errorMessage(err));
