@@ -1,6 +1,6 @@
 import * as fs from "fs";
 
-import type { ChannelMessage, MessageContent } from "../types.js";
+import type { ChannelMessage, MessageContent, SendMessageOptions } from "../types.js";
 
 export const WECHAT_CLAWBOT_PLATFORM = "wechat-clawbot";
 export const DEFAULT_POLL_INTERVAL_MS = 2000;
@@ -262,7 +262,7 @@ export class WechatClawbotSidecarClient {
     };
   }
 
-  async sendText(target: WechatClawbotTarget, content: MessageContent): Promise<void> {
+  async sendText(target: WechatClawbotTarget, content: MessageContent, options: SendMessageOptions = {}): Promise<void> {
     const text = content.text?.trim();
     const attachments = content.attachments ?? [];
     if (!text && attachments.length === 0) {
@@ -287,6 +287,7 @@ export class WechatClawbotSidecarClient {
               })),
             }
           : {}),
+        ...(options.replyToMessageId ? { reply_to_message_id: options.replyToMessageId } : {}),
       }),
     });
   }

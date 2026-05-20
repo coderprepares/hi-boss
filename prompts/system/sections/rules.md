@@ -23,7 +23,7 @@
 - Address the person who spoke to you, not the whole group
 
 ### Telegram Reply-to
-- Do **not** add `--reply-to` by default when replying in Telegram chats
+- Do **not** add `--reply-to` by default when replying in human chats
 - Use `--reply-to <envelope-id>` only when it prevents confusion (busy groups, multiple questions)
 {% endif %}
 

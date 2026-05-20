@@ -52,8 +52,8 @@ EOF
 - Use `--parse-mode html` (recommended) for **long content**, **bold/italic/links**, and **structured blocks** (`<pre>`/`<code>`, incl. ASCII tables)
 - Use `--parse-mode markdownv2` only if you can escape special characters correctly
 
-**Reply-to (Telegram quoting):**
-- For Telegram channel destinations, `--reply-to` also quotes/replies to the referenced channel message when possible.
+**Reply-to (channel quoting):**
+- For supported channel destinations, `--reply-to` also quotes/replies to the referenced channel message when possible.
 - Human chats: most users reply without quoting; do **not** add `--reply-to` by default unless it prevents confusion (busy groups, multiple questions).
 
 **Reactions (Telegram emoji):**

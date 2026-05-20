@@ -6,6 +6,7 @@ import {
   type IncomingWechatClawbotEvent,
   type StoredWechatClawbotAttachment,
   type StoredWechatClawbotInReplyTo,
+  type StoredWechatClawbotReplyReference,
   type WechatClawbotPendingOutboundMessage,
   type StoredWechatClawbotEvent,
   type StoredWechatClawbotSentMessage,
@@ -309,6 +310,27 @@ export class WechatClawbotStateStore {
     });
 
     return candidates.length === 1 ? candidates[0] : undefined;
+  }
+
+  findOutgoingReplyReference(
+    accountId: string,
+    peerId: string,
+    replyToMessageId: string
+  ): StoredWechatClawbotReplyReference | undefined {
+    const id = replyToMessageId.trim();
+    if (!id) return undefined;
+    const event = this.state.events.find((item) => (
+      item.account_id === accountId &&
+      item.peer_id === peerId &&
+      (item.event_id === id || item.message_id === id)
+    ));
+    const text = event?.text?.trim();
+    if (!event || !text) return undefined;
+    return {
+      ...(event.message_id ? { message_id: event.message_id } : {}),
+      ...(event.message_create_time_ms !== undefined ? { create_time_ms: event.message_create_time_ms } : {}),
+      text,
+    };
   }
 
   sendText(accountId: string, peerId: string, text: string): StoredWechatClawbotSentMessage {

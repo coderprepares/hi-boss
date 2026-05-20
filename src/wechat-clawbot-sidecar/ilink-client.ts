@@ -14,9 +14,11 @@ import {
   type UploadedWechatMedia,
 } from "./media.js";
 import { traceRawMessageFields } from "./raw-field-trace.js";
+import { buildTextRefMessage } from "./reply-reference.js";
 import type {
   IlinkMessage,
   StoredWechatClawbotAttachment,
+  StoredWechatClawbotReplyReference,
   WechatClawbotIlinkAccountConfig,
 } from "./types.js";
 
@@ -316,17 +318,27 @@ export class WechatClawbotIlinkClient {
     account: WechatClawbotIlinkAccountConfig,
     peerId: string,
     contextToken: string,
-    content: { text?: string; attachments?: StoredWechatClawbotAttachment[] }
+    content: { text?: string; attachments?: StoredWechatClawbotAttachment[]; replyTo?: StoredWechatClawbotReplyReference }
   ): Promise<void> {
     const text = content.text?.trim();
     const attachments = content.attachments ?? [];
     if (!text && attachments.length === 0) return;
 
     if (text) {
-      await this.postSendMessage(account, peerId, contextToken, [{
+      const textItem = {
         type: MessageItemType.TEXT,
         text_item: { text },
-      }]);
+      };
+      const refMsg = buildTextRefMessage(content.replyTo);
+      try {
+        await this.postSendMessage(account, peerId, contextToken, [{
+          ...textItem,
+          ...(refMsg ? { ref_msg: refMsg } : {}),
+        }]);
+      } catch (err) {
+        if (!refMsg) throw err;
+        await this.postSendMessage(account, peerId, contextToken, [textItem]);
+      }
     }
 
     for (const attachment of attachments) {

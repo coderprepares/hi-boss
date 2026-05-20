@@ -235,6 +235,22 @@ test("wechat-clawbot adapter sends text through sidecar peer endpoint", async ()
   assert.deepEqual(JSON.parse(capturedBody), { text: "reply" });
 });
 
+test("wechat-clawbot adapter forwards reply target to sidecar", async () => {
+  let capturedBody = "";
+  const fetchImpl = async (_input: string | URL, init?: RequestInit) => {
+    capturedBody = String(init?.body ?? "");
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+
+  const adapter = new WechatClawbotAdapter(makeAdapterToken(), { fetchImpl });
+  await adapter.sendMessage("acct/wxid_boss", { text: "reply" }, { replyToMessageId: "evt-parent" });
+
+  assert.deepEqual(JSON.parse(capturedBody), {
+    text: "reply",
+    reply_to_message_id: "evt-parent",
+  });
+});
+
 test("wechat-clawbot adapter sends attachments through sidecar peer endpoint", async () => {
   let capturedBody = "";
   const fetchImpl = async (_input: string | URL, init?: RequestInit) => {
