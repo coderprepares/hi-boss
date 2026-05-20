@@ -487,7 +487,7 @@ commands from the sidecar:
 - `/status <agent-name>`
 - `/abort [agent-name]`
 - `/help`
-Commands are handled as boss-only by `ChannelBridge`.
+Commands are handled as boss-only by `ChannelBridge`; replies use blank-line-separated logical lines so WeChat desktop and mobile render line breaks consistently.
 
 ## Security Notes
 

@@ -104,9 +104,12 @@ test("channel /help reports commands for the current platform", async () => {
 
   assert.match(wechat?.text ?? "", /\/new \[agent-name\]/);
   assert.match(wechat?.text ?? "", /\/abort \[agent-name\]/);
+  assert.match(wechat?.text ?? "", /Hi-Boss commands:\n\n\/help/);
+  assert.doesNotMatch(wechat?.text ?? "", /Hi-Boss commands:\n\/help/);
   assert.doesNotMatch(wechat?.text ?? "", /\/getconfig/);
   assert.doesNotMatch(wechat?.text ?? "", /\/verbose/);
   assert.match(telegram?.text ?? "", /\/verbose on\|off/);
+  assert.match(telegram?.text ?? "", /Hi-Boss commands:\n\/help/);
 });
 
 test("telegram /abort can target a named agent", async () => {
@@ -195,7 +198,7 @@ test("wechat /abort without args targets the bound agent", async () => {
       "agent-name: nex",
       "cancelled-run: false",
       "cleared-pending-count: 0",
-    ].join("\n"),
+    ].join("\n\n"),
   });
   assert.deepEqual(aborted, [{ agentName: "nex", reason: "wechat-clawbot:/abort" }]);
   assert.deepEqual(cleared, ["nex"]);
@@ -290,4 +293,60 @@ test("telegram /status can target a named agent", async () => {
 
   assert.equal(result?.text?.includes("name: kai"), true);
   assert.equal(result?.text?.includes("role: leader"), true);
+});
+
+test("wechat /status uses blank-line separators for cross-client display", async () => {
+  const agents = new Map([
+    ["nex", makeAgent("nex", "speaker")],
+  ]);
+  const snapshot: BackgroundSenderAgentSnapshot = {
+    state: "idle",
+    queuedCount: 0,
+    runningCount: 0,
+    openCount: 0,
+  };
+  const handler = createChannelCommandHandler({
+    db: {
+      getAgentByNameCaseInsensitive(name: string) {
+        return agents.get(name.toLowerCase()) ?? null;
+      },
+      countDuePendingEnvelopesForAgent() {
+        return 0;
+      },
+      getBindingsByAgentName() {
+        return [];
+      },
+      getCurrentRunningAgentRun() {
+        return null;
+      },
+      getLastFinishedAgentRun() {
+        return null;
+      },
+      getBossTimezone() {
+        return "UTC";
+      },
+    } as any,
+    executor: {
+      isAgentBusy() {
+        return false;
+      },
+    } as any,
+    backgroundExecutor: {
+      getSenderAgentSnapshot() {
+        return snapshot;
+      },
+    } as any,
+  });
+
+  const result = await handler({
+    platform: "wechat-clawbot",
+    command: "status",
+    args: "",
+    chatId: "acct/wxid_boss",
+    authorId: "wxid_boss",
+    agentName: "nex",
+  } as any);
+
+  assert.equal(result?.text?.includes("name: nex\n\nrole: speaker"), true);
+  assert.equal(result?.text?.includes("name: nex\nrole: speaker"), false);
 });

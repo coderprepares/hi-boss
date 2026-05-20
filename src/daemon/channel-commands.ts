@@ -9,6 +9,15 @@ import { AGENT_NAME_ERROR_MESSAGE, isValidAgentName } from "../shared/validation
 
 type EnrichedChannelCommand = ChannelCommand & { agentName?: string };
 
+function formatChannelCommandText(command: EnrichedChannelCommand, text: string): string {
+  if (command.platform !== "wechat-clawbot") return text;
+  return text.replace(/\r\n|\r/g, "\n").replace(/\n+/g, "\n\n");
+}
+
+function commandReply(command: EnrichedChannelCommand, text: string): MessageContent {
+  return { text: formatChannelCommandText(command, text) };
+}
+
 function commandReason(command: EnrichedChannelCommand): string {
   const platform = typeof command.platform === "string" && command.platform.trim()
     ? command.platform.trim()
@@ -84,52 +93,53 @@ export function createChannelCommandHandler(params: {
     if (typeof c.command !== "string") return;
 
     if (c.command === "help") {
-      return { text: buildChannelHelpText(c.platform) };
+      return commandReply(c, buildChannelHelpText(c.platform));
     }
 
     if (c.command === "new" && typeof c.agentName === "string" && c.agentName) {
       const target = resolveTargetAgentName(c);
       if ("error" in target) {
-        return { text: target.error };
+        return commandReply(c, target.error);
       }
 
       const agent = params.db.getAgentByNameCaseInsensitive(target.agentName);
       if (!agent) {
-        return { text: "error: Agent not found" };
+        return commandReply(c, "error: Agent not found");
       }
 
       params.executor.requestSessionRefresh(agent.name, commandReason(c));
       if (agent.name === c.agentName) {
-        return { text: "Session refresh requested." };
+        return commandReply(c, "Session refresh requested.");
       }
-      return { text: `Session refresh requested.\nagent-name: ${agent.name}` };
+      return commandReply(c, `Session refresh requested.\nagent-name: ${agent.name}`);
     }
 
     if (c.command === "status" && typeof c.agentName === "string" && c.agentName) {
       const target = resolveTargetAgentName(c);
       if ("error" in target) {
-        return { text: target.error };
+        return commandReply(c, target.error);
       }
 
-      return {
-        text: buildAgentStatusText({
+      return commandReply(
+        c,
+        buildAgentStatusText({
           db: params.db,
           executor: params.executor,
           backgroundExecutor: params.backgroundExecutor,
           agentName: target.agentName,
-        }),
-      };
+        })
+      );
     }
 
     if (c.command === "abort" && typeof c.agentName === "string" && c.agentName) {
       const target = resolveTargetAgentName(c);
       if ("error" in target) {
-        return { text: target.error };
+        return commandReply(c, target.error);
       }
 
       const agent = params.db.getAgentByNameCaseInsensitive(target.agentName);
       if (!agent) {
-        return { text: "error: Agent not found" };
+        return commandReply(c, "error: Agent not found");
       }
 
       const cancelledRun = params.executor.abortCurrentRun(agent.name, commandReason(c));
@@ -140,7 +150,7 @@ export function createChannelCommandHandler(params: {
         `cancelled-run: ${cancelledRun ? "true" : "false"}`,
         `cleared-pending-count: ${clearedPendingCount}`,
       ];
-      return { text: lines.join("\n") };
+      return commandReply(c, lines.join("\n"));
     }
 
     if (c.command === "verbose") {
@@ -148,16 +158,16 @@ export function createChannelCommandHandler(params: {
       const arg = c.args.trim().toLowerCase();
 
       if (!arg) {
-        return { text: `verbose: ${current ? "on" : "off"}` };
+        return commandReply(c, `verbose: ${current ? "on" : "off"}`);
       }
 
       if (arg === "on" || arg === "off") {
         const enabled = arg === "on";
         setTelegramVerboseEnabled(params.db, c.chatId, enabled);
-        return { text: `verbose: ${enabled ? "on" : "off"}` };
+        return commandReply(c, `verbose: ${enabled ? "on" : "off"}`);
       }
 
-      return { text: "error: usage /verbose on|off" };
+      return commandReply(c, "error: usage /verbose on|off");
     }
   };
 }
