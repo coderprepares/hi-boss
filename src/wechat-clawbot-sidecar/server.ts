@@ -367,13 +367,16 @@ export class WechatClawbotSidecarServer {
     try {
       await this.ilink.sendMessage(account, peerId, contextToken, { text: trimmed, attachments });
     } catch (err) {
+      const detail = safeStatusError(err);
       if (attachments.length === 0) {
-        this.store.recordPendingOutbound(accountId, peerId, trimmed, "send-failed", errorMessage(err));
+        this.store.recordPendingOutbound(accountId, peerId, trimmed, "send-failed", detail);
       }
       throw new SidecarHttpError(
         502,
         attachments.length === 0 ? "send-failed-queued" : "send-failed",
-        attachments.length === 0 ? "send failed; message queued for next peer activation" : "send failed"
+        attachments.length === 0
+          ? "send failed; message queued for next peer activation"
+          : `send failed: ${detail}`
       );
     }
     return this.store.recordSentText(accountId, peerId, contentSummary(trimmed, attachments));

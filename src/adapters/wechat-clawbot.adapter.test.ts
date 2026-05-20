@@ -366,3 +366,11 @@ test("wechat-clawbot adapter token rejects inline secrets", () => {
     /store secrets in tokenEnv or tokenFile/
   );
 });
+
+test("wechat-clawbot adapter token defaults to a media-friendly request timeout", () => {
+  const token = parseWechatClawbotAdapterToken(JSON.stringify({
+    baseUrl: "http://sidecar.local",
+  }));
+
+  assert.equal(token.requestTimeoutMs, 60000);
+});

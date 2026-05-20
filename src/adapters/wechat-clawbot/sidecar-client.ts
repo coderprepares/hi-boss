@@ -4,7 +4,7 @@ import type { ChannelMessage, MessageContent } from "../types.js";
 
 export const WECHAT_CLAWBOT_PLATFORM = "wechat-clawbot";
 export const DEFAULT_POLL_INTERVAL_MS = 2000;
-export const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
+export const DEFAULT_REQUEST_TIMEOUT_MS = 60000;
 
 export type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 

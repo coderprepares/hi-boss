@@ -428,7 +428,7 @@ channel:wechat-clawbot:bot_123/wxid_example
 
 The slash-separated chat id lets the adapter route replies to the correct
 sidecar account and peer. Bare peer ids are only valid when the adapter binding
-sets `defaultAccount`.
+sets `defaultAccount`; adapter HTTP timeout defaults to `60000` ms and can be overridden by `requestTimeoutMs`.
 
 ## Multi-Account Execution Model
 
