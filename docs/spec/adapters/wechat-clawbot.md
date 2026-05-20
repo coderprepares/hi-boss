@@ -404,10 +404,10 @@ Example `ilink` transport config:
 }
 ```
 
-The sidecar sends iLink requests with:
-- `AuthorizationType: ilink_bot_token`
-- `Authorization: Bearer <bot-token>`
-- optional `X-WECHAT-UIN`
+The sidecar aligns request metadata with `@tencent-weixin/openclaw-weixin`
+2.4.3: POST requests include `AuthorizationType`, `Authorization`,
+`X-WECHAT-UIN`, `iLink-App-Id: bot`, `iLink-App-ClientVersion: 132099`, and
+`base_info` with `channel_version: "2.4.3"` plus `bot_agent: "OpenClaw"`.
 
 For `getupdates`, it POSTs the persisted `get_updates_buf`. For
 `sendmessage`, it POSTs `msg.context_token` with a text item in

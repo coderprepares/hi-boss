@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as qrcode from "qrcode-terminal";
 
+import { buildWechatIlinkHeaders } from "./ilink-metadata.js";
 import type { FetchLike } from "./ilink-client.js";
 
 const DEFAULT_ILINK_API_BASE_URL = "https://ilinkai.weixin.qq.com";
@@ -26,10 +27,6 @@ interface LoginResult {
 
 function normalizeBaseUrl(raw: string): string {
   return new URL(raw).toString().replace(/\/$/, "");
-}
-
-function randomWechatUin(): string {
-  return String(Math.floor(1000000000 + Math.random() * 8999999999));
 }
 
 function readJsonFile(filePath: string): Record<string, unknown> {
@@ -100,7 +97,11 @@ export async function runWechatClawbotLogin(options: LoginOptions = {}): Promise
   const maxWaitMs = options.maxWaitMs ?? 180000;
   const pollIntervalMs = options.pollIntervalMs ?? 2000;
 
-  const qrResponse = await fetchJson(fetchImpl, `${apiBaseUrl}/ilink/bot/get_bot_qrcode?bot_type=3`);
+  const qrResponse = await fetchJson(fetchImpl, `${apiBaseUrl}/ilink/bot/get_bot_qrcode?bot_type=3`, {
+    method: "POST",
+    headers: buildWechatIlinkHeaders(),
+    body: JSON.stringify({ local_token_list: [] }),
+  });
   const qrcodeId = stringField(qrResponse, "qrcode");
   const qrContent = stringField(qrResponse, "qrcode_img_content", "qrcodeImgContent") ?? qrcodeId;
   if (!qrcodeId || !qrContent) throw new Error("Invalid QR login response");
@@ -116,11 +117,7 @@ export async function runWechatClawbotLogin(options: LoginOptions = {}): Promise
     const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
     try {
       const status = await fetchJson(fetchImpl, url, {
-        headers: {
-          AuthorizationType: "ilink_bot_token",
-          "iLink-App-ClientVersion": "1",
-          "X-WECHAT-UIN": randomWechatUin(),
-        },
+        headers: buildWechatIlinkHeaders({ includeContentType: false }),
         signal: controller.signal,
       });
       const statusText = stringField(status, "status");
