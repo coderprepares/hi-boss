@@ -68,7 +68,10 @@ test("sidecar resolves reply_to_message_id into outbound ref_msg", async () => {
     assert.equal(sent.status, 200);
     assert.equal(sendBodies.length, 1);
     const item = sendBodies[0].msg.item_list[0];
-    assert.equal(item.ref_msg.message_item.msg_id, "msg-parent");
+    assert.equal(item.ref_msg.message_item.msg_id, undefined);
+    assert.equal(item.ref_msg.message_item.is_completed, true);
+    assert.equal(item.ref_msg.message_item.create_time_ms, 1779213000000);
+    assert.equal(item.ref_msg.message_item.update_time_ms, 1779213000000);
     assert.deepEqual(item.ref_msg.message_item.text_item, { text: "quoted user text" });
   } finally {
     if (previousToken === undefined) delete process.env.ILINK_TOKEN;

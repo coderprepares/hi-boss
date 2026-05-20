@@ -37,8 +37,10 @@ test("iLink client sends text replies with ref_msg", async () => {
   assert.equal(item.type, 1);
   assert.deepEqual(item.text_item, { text: "bot reply" });
   assert.equal(item.ref_msg.title, "quoted user text");
-  assert.equal(item.ref_msg.message_item.msg_id, "msg-parent");
+  assert.equal(item.ref_msg.message_item.msg_id, undefined);
+  assert.equal(item.ref_msg.message_item.is_completed, true);
   assert.equal(item.ref_msg.message_item.create_time_ms, 1779213000000);
+  assert.equal(item.ref_msg.message_item.update_time_ms, 1779213000000);
   assert.deepEqual(item.ref_msg.message_item.text_item, { text: "quoted user text" });
 });
 

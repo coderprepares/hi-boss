@@ -44,6 +44,9 @@ const MessageItemType = {
   FILE: 4,
 } as const;
 
+const ILINK_APP_ID = "bot";
+const ILINK_CHANNEL_VERSION = "2.4.3";
+const ILINK_BOT_AGENT = "HiBoss/2026.2.12";
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"]);
 
 function objectRecord(value: unknown, label: string): Record<string, unknown> {
@@ -98,6 +101,18 @@ function uploadAesKeyForMessage(aeskeyHex: string): string {
 function randomWechatUin(): string {
   const value = String(Math.floor(Math.random() * 0x100000000));
   return Buffer.from(value).toString("base64");
+}
+
+function encodedIlinkClientVersion(version: string): string {
+  const [major = 0, minor = 0, patch = 0] = version.split(".").map((part) => Number.parseInt(part, 10) || 0);
+  return String(((major & 0xff) << 16) | ((minor & 0xff) << 8) | (patch & 0xff));
+}
+
+function baseInfo(): Record<string, string> {
+  return {
+    channel_version: ILINK_CHANNEL_VERSION,
+    bot_agent: ILINK_BOT_AGENT,
+  };
 }
 
 function mediaRef(value: unknown): WechatCdnMediaRef | undefined {
@@ -258,9 +273,7 @@ export class WechatClawbotIlinkClient {
   ): Promise<{ messages: IlinkMessage[]; nextCursor: string }> {
     const data = await this.post(account, "/ilink/bot/getupdates", {
       get_updates_buf: getUpdatesBuf,
-      base_info: {
-        channel_version: "1.0.0",
-      },
+      base_info: baseInfo(),
     });
     const record = objectRecord(data, "iLink getupdates response");
     return {
@@ -292,9 +305,7 @@ export class WechatClawbotIlinkClient {
     return await this.post(account, "/ilink/bot/getconfig", {
       ilink_user_id: peerId,
       context_token: contextToken,
-      base_info: {
-        channel_version: "1.0.0",
-      },
+      base_info: baseInfo(),
     });
   }
 
@@ -308,9 +319,7 @@ export class WechatClawbotIlinkClient {
       ilink_user_id: peerId,
       typing_ticket: typingTicket,
       status,
-      base_info: {
-        channel_version: "1.0.0",
-      },
+      base_info: baseInfo(),
     });
   }
 
@@ -392,9 +401,7 @@ export class WechatClawbotIlinkClient {
       filesize: aesEcbPaddedSize(rawSize),
       no_need_thumb: true,
       aeskey: aeskeyHex,
-      base_info: {
-        channel_version: "1.0.3",
-      },
+      base_info: baseInfo(),
     });
     const record = objectRecord(uploadUrl, "iLink getuploadurl response");
     const uploaded = await uploadWechatCdnMedia({
@@ -433,9 +440,7 @@ export class WechatClawbotIlinkClient {
         context_token: contextToken,
         item_list: itemList,
       },
-      base_info: {
-        channel_version: "1.0.3",
-      },
+      base_info: baseInfo(),
     });
   }
 
@@ -447,6 +452,8 @@ export class WechatClawbotIlinkClient {
     const token = resolveWechatClawbotIlinkBotToken(account, this.env);
     const headers = new Headers({
       "Content-Type": "application/json",
+      "iLink-App-Id": ILINK_APP_ID,
+      "iLink-App-ClientVersion": encodedIlinkClientVersion(ILINK_CHANNEL_VERSION),
       AuthorizationType: "ilink_bot_token",
       Authorization: `Bearer ${token}`,
       "X-WECHAT-UIN": randomWechatUin(),

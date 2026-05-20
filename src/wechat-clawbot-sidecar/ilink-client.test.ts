@@ -52,10 +52,13 @@ test("iLink client sends official auth headers and normalizes text updates", asy
   assert.equal(requests[0].headers.get("AuthorizationType"), "ilink_bot_token");
   assert.equal(requests[0].headers.get("Authorization"), "Bearer test-bot-token");
   assert.equal(requests[0].headers.get("X-WECHAT-UIN"), "12345");
+  assert.equal(requests[0].headers.get("iLink-App-Id"), "bot");
+  assert.equal(requests[0].headers.get("iLink-App-ClientVersion"), "132099");
   assert.deepEqual(requests[0].body, {
     get_updates_buf: "cursor-1",
     base_info: {
-      channel_version: "1.0.0",
+      channel_version: "2.4.3",
+      bot_agent: "HiBoss/2026.2.12",
     },
   });
   assert.equal(result.nextCursor, "cursor-2");
@@ -338,7 +341,8 @@ test("iLink client sends text with context token", async () => {
   assert.equal(requests[0].body.msg.context_token, "context-1");
   assert.equal(requests[0].body.msg.item_list[0].type, 1);
   assert.deepEqual(requests[0].body.msg.item_list[0].text_item, { text: "reply" });
-  assert.equal(requests[0].body.base_info.channel_version, "1.0.3");
+  assert.equal(requests[0].body.base_info.channel_version, "2.4.3");
+  assert.equal(requests[0].body.base_info.bot_agent, "HiBoss/2026.2.12");
 });
 
 test("iLink client gets config and sends typing with ticket", async () => {
@@ -374,7 +378,8 @@ test("iLink client gets config and sends typing with ticket", async () => {
   assert.equal(requests[0].url, "https://ilink.example.test/ilink/bot/getconfig");
   assert.equal(requests[0].body.ilink_user_id, "wxid_boss");
   assert.equal(requests[0].body.context_token, "context-1");
-  assert.equal(requests[0].body.base_info.channel_version, "1.0.0");
+  assert.equal(requests[0].body.base_info.channel_version, "2.4.3");
+  assert.equal(requests[0].body.base_info.bot_agent, "HiBoss/2026.2.12");
   assert.equal(requests[1].url, "https://ilink.example.test/ilink/bot/sendtyping");
   assert.equal(requests[1].body.ilink_user_id, "wxid_boss");
   assert.equal(requests[1].body.typing_ticket, "typing-ticket-1");
