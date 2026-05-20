@@ -1,13 +1,22 @@
 import * as net from "net";
 import type { JsonRpcRequest, JsonRpcResponse } from "../daemon/ipc/types.js";
 
+export const DEFAULT_IPC_REQUEST_TIMEOUT_MS = 120000;
+
+export interface IpcClientOptions {
+  requestTimeoutMs?: number;
+}
+
 /**
  * IPC client for communicating with the Hi-Boss daemon.
  */
 export class IpcClient {
   private requestId = 0;
 
-  constructor(private socketPath: string) {}
+  constructor(
+    private socketPath: string,
+    private options: IpcClientOptions = {}
+  ) {}
 
   /**
    * Call an RPC method on the daemon.
@@ -41,7 +50,20 @@ export class IpcClient {
   private sendRequest(request: JsonRpcRequest): Promise<JsonRpcResponse> {
     return new Promise((resolve, reject) => {
       const socket = net.createConnection(this.socketPath);
+      const requestTimeoutMs = this.resolveRequestTimeoutMs();
       let buffer = "";
+      let settled = false;
+
+      const finish = (
+        callback: () => void,
+        close: "end" | "destroy" = "end"
+      ) => {
+        if (settled) return;
+        settled = true;
+        if (close === "destroy") socket.destroy();
+        else socket.end();
+        callback();
+      };
 
       socket.on("connect", () => {
         socket.write(JSON.stringify(request) + "\n");
@@ -55,31 +77,38 @@ export class IpcClient {
           const line = buffer.slice(0, newlineIndex);
           try {
             const response = JSON.parse(line) as JsonRpcResponse;
-            socket.end();
-            resolve(response);
+            finish(() => resolve(response));
           } catch (err) {
-            socket.end();
-            reject(new Error("Invalid response from daemon"));
+            finish(() => reject(new Error("Invalid response from daemon")));
           }
         }
       });
 
       socket.on("error", (err) => {
         if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-          reject(new Error("Daemon is not running. Start it with: hiboss daemon start"));
+          finish(
+            () => reject(new Error("Daemon is not running. Start it with: hiboss daemon start")),
+            "destroy"
+          );
         } else if ((err as NodeJS.ErrnoException).code === "ECONNREFUSED") {
-          reject(new Error("Cannot connect to daemon. Try restarting it."));
+          finish(() => reject(new Error("Cannot connect to daemon. Try restarting it.")), "destroy");
         } else {
-          reject(err);
+          finish(() => reject(err), "destroy");
         }
       });
 
       socket.on("timeout", () => {
-        socket.end();
-        reject(new Error("Request timed out"));
+        finish(() => reject(new Error(`Request timed out after ${requestTimeoutMs}ms`)), "destroy");
       });
 
-      socket.setTimeout(30000);
+      socket.setTimeout(requestTimeoutMs);
     });
+  }
+
+  private resolveRequestTimeoutMs(): number {
+    const value = this.options.requestTimeoutMs;
+    return typeof value === "number" && Number.isFinite(value) && value > 0
+      ? Math.floor(value)
+      : DEFAULT_IPC_REQUEST_TIMEOUT_MS;
   }
 }

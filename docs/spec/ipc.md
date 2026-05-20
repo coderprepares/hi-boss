@@ -15,6 +15,8 @@ Key files:
 
 - Socket path: `~/hiboss/.daemon/daemon.sock` (or `{{HIBOSS_DIR}}/.daemon/daemon.sock` when overridden)
 - Protocol: JSON-RPC 2.0
+- CLI request timeout: `120000` ms, long enough for synchronous channel delivery
+  paths that upload media before returning.
 
 ---
 
