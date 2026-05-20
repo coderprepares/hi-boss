@@ -10,9 +10,9 @@ import {
   md5Hex,
   randomHex,
   uploadWechatCdnMedia,
-  type WechatCdnMediaRef,
   type UploadedWechatMedia,
 } from "./media.js";
+import { attachmentsFromItemList } from "./inbound-attachments.js";
 import { normalizeWechatOutboundText } from "./outbound-text.js";
 import { traceRawMessageFields } from "./raw-field-trace.js";
 import type {
@@ -72,14 +72,6 @@ function arrayField(record: Record<string, unknown>, ...keys: string[]): unknown
   return [];
 }
 
-function numberField(record: Record<string, unknown>, ...keys: string[]): number | undefined {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-  }
-  return undefined;
-}
-
 function normalizeBaseUrl(raw: string): string {
   const url = new URL(raw);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
@@ -109,83 +101,6 @@ function uploadedMediaRef(uploaded: UploadedWechatMedia): Record<string, string 
 function randomWechatUin(): string {
   const value = String(Math.floor(Math.random() * 0x100000000));
   return Buffer.from(value).toString("base64");
-}
-
-function mediaRef(value: unknown): WechatCdnMediaRef | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as WechatCdnMediaRef
-    : undefined;
-}
-
-async function attachmentsFromItemList(params: {
-  items: unknown;
-  messageId: string;
-  mediaDir: string;
-  fetchImpl: FetchLike;
-  requestTimeoutMs: number;
-}): Promise<StoredWechatClawbotAttachment[]> {
-  const items = Array.isArray(params.items) ? params.items : [];
-  const result: StoredWechatClawbotAttachment[] = [];
-
-  for (let index = 0; index < items.length; index += 1) {
-    const item = items[index];
-    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-    const record = item as Record<string, unknown>;
-    const itemType = stringField(record, "type", "item_type", "itemType")?.toUpperCase();
-    const numericType = numberField(record, "type");
-    const type = numericType ?? (
-      itemType === "IMAGE" ? MessageItemType.IMAGE :
-      itemType === "VIDEO" ? MessageItemType.VIDEO :
-      itemType === "FILE" ? MessageItemType.FILE : undefined
-    );
-
-    if (type === MessageItemType.IMAGE && record.image_item && typeof record.image_item === "object") {
-      const image = record.image_item as Record<string, unknown>;
-      const media = mediaRef(image.media) ?? mediaRef(image.thumb_media);
-      if (!media) continue;
-      const attachment = await downloadWechatCdnMedia({
-        media,
-        mediaDir: params.mediaDir,
-        filename: defaultWechatMediaFilename({ messageId: params.messageId, itemIndex: index, kind: "image" }),
-        aesKey: stringField(image, "aeskey", "aes_key"),
-        fetchImpl: params.fetchImpl,
-        requestTimeoutMs: params.requestTimeoutMs,
-      });
-      if (attachment) result.push(attachment);
-    }
-
-    if (type === MessageItemType.VIDEO && record.video_item && typeof record.video_item === "object") {
-      const video = record.video_item as Record<string, unknown>;
-      const media = mediaRef(video.media);
-      if (!media) continue;
-      const attachment = await downloadWechatCdnMedia({
-        media,
-        mediaDir: params.mediaDir,
-        filename: defaultWechatMediaFilename({ messageId: params.messageId, itemIndex: index, kind: "video" }),
-        aesKey: stringField(video, "aeskey", "aes_key"),
-        fetchImpl: params.fetchImpl,
-        requestTimeoutMs: params.requestTimeoutMs,
-      });
-      if (attachment) result.push(attachment);
-    }
-
-    if (type === MessageItemType.FILE && record.file_item && typeof record.file_item === "object") {
-      const file = record.file_item as Record<string, unknown>;
-      const media = mediaRef(file.media);
-      if (!media) continue;
-      const filename = stringField(file, "file_name", "filename", "name");
-      const attachment = await downloadWechatCdnMedia({
-        media,
-        mediaDir: params.mediaDir,
-        filename: defaultWechatMediaFilename({ messageId: params.messageId, itemIndex: index, kind: "file", filename }),
-        fetchImpl: params.fetchImpl,
-        requestTimeoutMs: params.requestTimeoutMs,
-      });
-      if (attachment) result.push(attachment);
-    }
-  }
-
-  return result;
 }
 
 async function quotedAttachmentsFromItemList(params: {

@@ -16,7 +16,6 @@ class FakeAdapter implements ChatAdapter {
   readonly platform = "wechat-clawbot";
   messageHandler?: ChannelMessageHandler;
   commandHandler?: ChannelCommandHandler;
-  adapterCommands: ChannelCommand[] = [];
 
   async sendMessage(_chatId: string, _content: MessageContent): Promise<void> {}
 
@@ -26,12 +25,6 @@ class FakeAdapter implements ChatAdapter {
 
   onCommand(handler: ChannelCommandHandler): void {
     this.commandHandler = handler;
-  }
-
-  async handleCommand(command: ChannelCommand): Promise<MessageContent | void> {
-    if (command.command !== "getconfig") return;
-    this.adapterCommands.push(command);
-    return { text: "adapter-local" };
   }
 
   async start(): Promise<void> {}
@@ -162,45 +155,4 @@ test("channel bridge resolves channel commands through execution lanes", async (
   assert.deepEqual(response, { text: "ok" });
   assert.equal(seenCommands.length, 1);
   assert.equal(seenCommands[0].agentName, "lane-speaker");
-});
-
-test("channel bridge lets adapters handle boss-only local commands", async () => {
-  const adapter = new FakeAdapter();
-  const seenCommands: ChannelCommand[] = [];
-  const bridge = new ChannelBridge(
-    {
-      registerAdapter() {},
-      routeEnvelope() {},
-    } as any,
-    {
-      getAdapterBossId() {
-        return "wxid_boss";
-      },
-      getBindingByAdapter() {
-        return { agentName: "default-speaker" };
-      },
-      listAgents() {
-        return [];
-      },
-    } as any,
-    {} as any
-  );
-
-  bridge.setCommandHandler((command) => {
-    seenCommands.push(command);
-    return { text: "global" };
-  });
-  bridge.connect(adapter, "sidecar-token");
-
-  const response = await adapter.commandHandler?.({
-    platform: "wechat-clawbot",
-    command: "getconfig",
-    args: "",
-    chatId: "acct-a/wxid_boss",
-    authorId: "wxid_boss",
-  });
-
-  assert.deepEqual(response, { text: "adapter-local" });
-  assert.equal(adapter.adapterCommands.length, 1);
-  assert.equal(seenCommands.length, 0);
 });

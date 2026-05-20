@@ -104,7 +104,7 @@ test("channel /help reports commands for the current platform", async () => {
 
   assert.match(wechat?.text ?? "", /\/new \[agent-name\]/);
   assert.match(wechat?.text ?? "", /\/abort \[agent-name\]/);
-  assert.match(wechat?.text ?? "", /\/getconfig/);
+  assert.doesNotMatch(wechat?.text ?? "", /\/getconfig/);
   assert.doesNotMatch(wechat?.text ?? "", /\/verbose/);
   assert.match(telegram?.text ?? "", /\/verbose on\|off/);
 });

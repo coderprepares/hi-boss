@@ -27,8 +27,13 @@ function textFromItemRecord(record: Record<string, unknown>): string | undefined
   const textItem = record.text_item && typeof record.text_item === "object"
     ? record.text_item as Record<string, unknown>
     : {};
+  const voiceItem = record.voice_item && typeof record.voice_item === "object"
+    ? record.voice_item as Record<string, unknown>
+    : {};
   const text = stringField(record, "text", "content") ?? stringField(textItem, "text");
   if (text && (!itemType || itemType === "TEXT" || numericType === 1)) return text;
+  const voiceText = stringField(voiceItem, "text");
+  if (voiceText && (itemType === "VOICE" || numericType === 3)) return voiceText;
   return undefined;
 }
 

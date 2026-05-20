@@ -51,13 +51,6 @@ Request:
 
 `status: 1` starts typing and `status: 2` stops typing.
 
-## `/getconfig`
-
-The WeChat adapter recognizes `/getconfig` as a boss-only channel command. The
-command is handled by the adapter after `ChannelBridge` verifies the sender is
-the configured boss and resolves the execution lane. The reply shows the raw
-`config` object returned by the sidecar.
-
 ## Run Typing
 
 For WeChat-originated agent runs, the daemon creates a typing indicator for the
