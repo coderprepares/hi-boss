@@ -117,7 +117,7 @@ envelope
       "  - For agent-originated Telegram sends, omitted parse mode defaults to MarkdownV2 with automatic Telegram-safe escaping.",
       "  - Use --parse-mode html when you need Telegram HTML entities such as <u>, <blockquote>, <tg-spoiler>, or explicit <a>/<pre><code> blocks.",
       "  - Use --parse-mode markdownv2 only if you can escape special characters correctly yourself.",
-      "  - Most human chats reply without quoting; only use --reply-to when it prevents confusion (busy groups, multiple questions).",
+      "  - Most Telegram users reply without quoting; only use --reply-to when it prevents confusion (busy groups, multiple questions).",
       "",
     ].join("\n")
   )

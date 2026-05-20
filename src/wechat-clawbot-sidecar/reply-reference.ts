@@ -13,13 +13,12 @@ export function buildTextRefMessage(
   const text = replyTo?.text.trim();
   if (!replyTo || !text) return undefined;
   const quotedText = truncate(text, MAX_REF_TEXT_CHARS);
-  const itemTime = replyTo.create_time_ms;
   return {
     title: truncate(text, MAX_REF_TITLE_CHARS),
     message_item: {
       type: 1,
-      is_completed: true,
-      ...(itemTime !== undefined ? { create_time_ms: itemTime, update_time_ms: itemTime } : {}),
+      ...(replyTo.message_id ? { msg_id: replyTo.message_id } : {}),
+      ...(replyTo.create_time_ms !== undefined ? { create_time_ms: replyTo.create_time_ms } : {}),
       text_item: { text: quotedText },
     },
   };
