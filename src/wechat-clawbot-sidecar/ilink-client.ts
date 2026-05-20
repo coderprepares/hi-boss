@@ -1,6 +1,3 @@
-import * as fs from "fs";
-import * as path from "path";
-
 import { resolveWechatClawbotIlinkBotToken } from "./config.js";
 import { inReplyToFromItemList, quotedMessageRecordsFromItemList, textFromItemList } from "./message-items.js";
 import {
@@ -14,6 +11,7 @@ import {
 } from "./media.js";
 import { attachmentsFromItemList } from "./inbound-attachments.js";
 import { normalizeWechatOutboundText } from "./outbound-text.js";
+import { detectOutboundKind, readOutboundAttachment, type UploadedWechatAttachment } from "./outbound-attachments.js";
 import { traceRawMessageFields } from "./raw-field-trace.js";
 import type {
   IlinkMessage,
@@ -45,9 +43,6 @@ const MessageItemType = {
   FILE: 4,
 } as const;
 
-const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"]);
-const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"]);
-
 function objectRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`Invalid ${label}`);
@@ -78,12 +73,6 @@ function normalizeBaseUrl(raw: string): string {
     throw new Error("Invalid iLink apiBaseUrl");
   }
   return url.toString().replace(/\/$/, "");
-}
-
-function detectOutboundKind(attachment: StoredWechatClawbotAttachment): "image" | "video" | "file" {
-  const ext = path.extname(attachment.filename ?? attachment.source).toLowerCase();
-  if (IMAGE_EXTENSIONS.has(ext)) return "image";
-  return VIDEO_EXTENSIONS.has(ext) ? "video" : "file";
 }
 
 function uploadAesKeyForMessage(aeskeyHex: string): string {
@@ -278,7 +267,7 @@ export class WechatClawbotIlinkClient {
 
     for (const attachment of attachments) {
       const uploaded = await this.uploadAttachment(account, peerId, attachment);
-      const kind = detectOutboundKind(attachment);
+      const kind = uploaded.kind;
       const media = uploadedMediaRef(uploaded);
       if (kind === "image") {
         await this.postSendMessage(account, peerId, contextToken, [{
@@ -301,7 +290,7 @@ export class WechatClawbotIlinkClient {
           type: MessageItemType.FILE,
           file_item: {
             media,
-            file_name: path.basename(attachment.filename ?? attachment.source),
+            file_name: uploaded.filename,
             len: String(uploaded.rawSize),
           },
         }]);
@@ -313,12 +302,16 @@ export class WechatClawbotIlinkClient {
     account: WechatClawbotIlinkAccountConfig,
     peerId: string,
     attachment: StoredWechatClawbotAttachment
-  ): Promise<UploadedWechatMedia> {
-    const plaintext = fs.readFileSync(attachment.source);
+  ): Promise<UploadedWechatAttachment> {
+    const data = await readOutboundAttachment(attachment, {
+      fetchImpl: this.fetchImpl,
+      requestTimeoutMs: this.options.requestTimeoutMs,
+    });
+    const plaintext = data.plaintext;
     const rawSize = plaintext.length;
     const filekey = randomHex(16);
     const aeskeyHex = randomHex(16);
-    const kind = detectOutboundKind(attachment);
+    const kind = detectOutboundKind({ source: data.filename, filename: data.filename });
     const uploadUrl = await this.post(account, "/ilink/bot/getuploadurl", {
       filekey,
       media_type: kind === "image" ? UploadMediaType.IMAGE :
@@ -346,6 +339,8 @@ export class WechatClawbotIlinkClient {
     });
     return {
       filekey,
+      filename: data.filename,
+      kind,
       downloadEncryptedQueryParam: uploaded.downloadEncryptedQueryParam,
       aeskeyHex,
       rawSize,

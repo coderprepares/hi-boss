@@ -244,11 +244,17 @@ test("wechat-clawbot adapter sends attachments through sidecar peer endpoint", a
 
   const adapter = new WechatClawbotAdapter(makeAdapterToken(), { fetchImpl });
   await adapter.sendMessage("acct/wxid_boss", {
-    attachments: [{ source: "/tmp/report.pdf", filename: "report.pdf" }],
+    attachments: [
+      { source: "/tmp/report.pdf", filename: "report.pdf" },
+      { source: "https://assets.example.test/photo.jpg", filename: "photo.jpg" },
+    ],
   });
 
   assert.deepEqual(JSON.parse(capturedBody), {
-    attachments: [{ source: "/tmp/report.pdf", filename: "report.pdf" }],
+    attachments: [
+      { source: "/tmp/report.pdf", filename: "report.pdf" },
+      { source: "https://assets.example.test/photo.jpg", filename: "photo.jpg" },
+    ],
   });
 });
 

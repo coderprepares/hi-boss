@@ -20,7 +20,7 @@ MVP scope:
 - Direct-message text flow plus image/video/file attachments over iLink CDN media.
 - Local sidecar only (`127.0.0.1` or equivalent local networking).
 - Inbound text and downloaded image/video/file/voice attachments from sidecar → Hi-Boss envelopes.
-- Agent text/image/video/file replies from Hi-Boss → sidecar `sendmessage`.
+- Agent text/image/video/file replies from Hi-Boss → sidecar `sendmessage`, using local files or HTTP(S) media URLs.
 - Stable boss identification by sidecar peer id.
 - No real WeChat credentials in Hi-Boss DB, envelopes, logs, or prompts.
 
@@ -104,14 +104,14 @@ pending items into a single summary when appropriate.
 
 ### `POST /accounts/:accountId/peers/:peerId/messages`
 
-Sends a text and/or local image/video/file attachment reply using the latest stored `context_token`.
+Sends a text and/or image/video/file attachment reply using the latest stored `context_token`.
 
 Request:
 
 ```json
 {
   "text": "agent reply",
-  "attachments": [{ "source": "/root/hiboss/media/report.pdf", "filename": "report.pdf" }]
+  "attachments": [{ "source": "http://example.test/report.pdf", "filename": "report.pdf" }]
 }
 ```
 
@@ -459,12 +459,12 @@ and recommended multi-account rollout.
 1. Agent sends an envelope to `channel:wechat-clawbot:<account-id>/<peer-id>`.
 2. Router verifies the sender agent has a `wechat-clawbot` binding.
 3. Adapter calls sidecar `POST /accounts/:accountId/peers/:peerId/messages`.
-4. Sidecar sends text via `sendmessage` after normalizing CRLF/CR line breaks to LF; image/video/file attachments are AES-encrypted and sent as iLink CDN media items.
+4. Sidecar sends text via `sendmessage` after normalizing CRLF/CR line breaks to LF; local or HTTP(S) image/video/file attachments are AES-encrypted and sent as iLink CDN media items.
 5. If iLink text send fails after a context exists, sidecar queues the outbound
    text and flushes it after the next inbound peer message refreshes the context.
 
-The MVP adapter rejects empty content. Attachment sends require local file paths
-and are not queued on send failure.
+The MVP adapter rejects empty content. Attachment sends require local paths or
+HTTP(S) URLs and are not queued on send failure.
 
 ## Boss Identification
 
