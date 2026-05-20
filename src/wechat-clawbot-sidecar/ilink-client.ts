@@ -13,6 +13,7 @@ import {
   type WechatCdnMediaRef,
   type UploadedWechatMedia,
 } from "./media.js";
+import { normalizeWechatOutboundText } from "./outbound-text.js";
 import { traceRawMessageFields } from "./raw-field-trace.js";
 import type {
   IlinkMessage,
@@ -356,7 +357,7 @@ export class WechatClawbotIlinkClient {
     if (text) {
       await this.postSendMessage(account, peerId, contextToken, [{
         type: MessageItemType.TEXT,
-        text_item: { text },
+        text_item: { text: normalizeWechatOutboundText(text) },
       }]);
     }
 
